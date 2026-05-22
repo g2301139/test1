@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>秋田県：天気＆安全対策情報「ベアウェザー」</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.min.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.min.css" />
+
+<style>
+html, body {
+  height: 100%; width: 100%; margin: 0; padding: 0;
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  background: #f0f3f6; color: #333; overflow: hidden;
+}
+#app { display: flex; flex-direction: column; height: 100vh; width: 100vw; position: relative; }
+.header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 20px; background: #2c3e50; color: #fff; flex-shrink: 0; z-index: 1000;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+.header h1 { font-size: 18px; font-weight: bold; letter-spacing: 1px; margin: 0; }
+.header-date { font-size: 14px; color: #bdc3c7; }
+.dashboard { display: flex; flex-direction: column; flex: 1; height: 100%; width: 100%; overflow: hidden; }
+.weather-bear-alert {
+  background: linear-gradient(135deg, #7f8c8d 0%, #95a5a6 100%);
+  color: #fff; padding: 12px 20px; display: flex; gap: 20px; align-items: center;
+  flex-shrink: 0; box-shadow: inset 0 -2px 5px rgba(0,0,0,0.1);
+}
+.w-card {
+  display: flex; align-items: center; gap: 12px; background: rgba(255,255,255,0.15);
+  padding: 8px 16px; border-radius: 8px; flex-shrink: 0;
+}
+.w-info .w-temp { font-size: 22px; font-weight: bold; }
+.w-info .w-text { font-size: 11px; opacity: 0.9; white-space: nowrap; }
+.alert-message { flex: 1; }
+.alert-message .alert-title { font-size: 15px; font-weight: bold; display: flex; align-items: center; gap: 6px; margin: 0; }
+.alert-message .alert-desc { font-size: 12px; opacity: 0.95; margin-top: 2px; }
+.content-body { display: flex; flex: 1; width: 100%; height: 100%; position: relative; overflow: hidden; }
+.sidebar {
+  width: 380px; min-width: 380px; background: #fff; border-right: 1px solid #dcdde1;
+  display: flex; flex-direction: column; height: 100%; flex-shrink: 0; z-index: 10;
+}
+.weather-advice { padding: 12px 15px; background: #f8f9fa; border-bottom: 1px solid #eee; font-size: 12px; line-height: 1.5; color: #475569; flex-shrink: 0; }
+.weather-advice h3 { font-size: 13px; color: #2c3e50; margin-top: 0; margin-bottom: 4px; display: flex; align-items: center; gap: 4px; }
+.weather-forecast-container { padding: 10px 15px; background: #ffffff; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
+.weather-forecast-title { font-size: 11px; font-weight: bold; color: #64748b; margin-bottom: 6px; }
+.weather-timeline { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 8px; }
+.weather-timeline::-webkit-scrollbar { height: 5px; }
+.weather-timeline::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 10px; }
+.weather-timeline::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+.forecast-item {
+  flex-shrink: 0; display: flex; flex-direction: column; align-items: center;
+  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 4px; min-width: 70px; text-align: center;
+}
+.forecast-time { font-size: 11px; color: #64748b; font-weight: bold; }
+.forecast-icon { font-size: 18px; margin: 3px 0; }
+.forecast-temp { font-size: 12px; font-weight: bold; color: #334155; }
+.weather-details-mini { margin-top: 5px; width: 100%; font-size: 10px; text-align: center; border-top: 1px dashed #e2e8f0; padding-top: 4px; display: flex; flex-direction: column; gap: 1px; }
+.w-info-mini { font-weight: 500; }
+.w-info-mini.pop { color: #2b7de9; }
+.w-info-mini.rain { color: #1a5bb4; }
+.w-info-mini.wind { color: #666666; }
+.w-info-mini.snow { color: #00a4b4; font-weight: bold; }
+.filter-box { padding: 12px; border-bottom: 1px solid #eee; background: #fff; flex-shrink: 0; }
+#type-filters { display: flex; gap: 6px; margin-bottom: 8px; }
+.fbtn {
+  flex: 1; padding: 6px; border: 1px solid #cbd5e1; background: #fff;
+  border-radius: 4px; font-size: 12px; cursor: pointer; text-align: center; font-weight: bold;
+}
+.fbtn.on { background: #2c3e50; color: #fff; border-color: #2c3e50; }
+.fbtn.on-orange { background: #e67e22; color: #fff; border-color: #e67e22; }
+.fbtn.on-blue { background: #3498db; color: #fff; border-color: #3498db; }
+.select-ctrl { width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1; font-size: 13px; outline: none; }
+.list-hdr { padding: 8px 12px; background: #f1f5f9; font-size: 12px; font-weight: bold; color: #64748b; flex-shrink: 0; }
+.list-scroll { flex: 1; overflow-y: auto; background: #fff; }
+.sitem { padding: 12px; border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: 0.2s; }
+.sitem:hover { background: #f8fafc; }
+.sitem-title { font-weight: bold; font-size: 13px; color: #2c3e50; margin-bottom: 4px; }
+.sitem-meta { font-size: 11px; color: #7f8c8d; line-height: 1.4; margin-bottom: 4px; }
+.type-tag { display: inline-block; font-size: 10px; padding: 2px 6px; border-radius: 3px; font-weight: bold; }
+.tag-目撃 { background: #e2e8f0; color: #475569; }
+.tag-人身被害 { background: #fde8e8; color: #e74c3c; }
+.tag-痕跡 { background: #e0f2fe; color: #0284c7; }
+.tag-気象災害 { background: #ffeaa7; color: #d35400; }
+
+.action-panel { padding: 12px; background: #fff; border-top: 1px solid #eee; flex-shrink: 0; display: flex; gap: 8px; }
+.btn-primary {
+  flex: 1; padding: 10px; background: #27ae60; color: #fff;
+  border: none; border-radius: 6px; font-weight: bold; cursor: pointer; text-align: center; font-size: 13px;
+}
+.btn-primary:hover { background: #219653; }
+.btn-export {
+  padding: 10px; background: #e67e22; color: #fff;
+  border: none; border-radius: 6px; font-weight: bold; cursor: pointer; text-align: center; font-size: 13px;
+}
+.btn-export:hover { background: #d35400; }
+
+#map { flex: 1; height: 100%; width: 100%; background: #e5e9f0; position: relative; }
+.leaflet-control-gps {
+  background: #fff; border: 2px solid rgba(0,0,0,0.2); border-radius: 4px;
+  padding: 5px 10px; cursor: pointer; font-weight: bold; font-size: 12px; color: #333;
+  display: flex; align-items: center; gap: 4px; box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+}
+.leaflet-control-gps:hover { background: #f4f4f4; }
+.popup-type { font-weight: bold; padding: 2px 6px; border-radius: 3px; display: inline-block; font-size: 11px; margin-bottom: 6px; }
+.popup-title { font-weight: bold; font-size: 13px; margin-bottom: 4px; }
+.popup-meta { font-size: 12px; color: #444; line-height: 1.4; }
+
+/* 🔴 【新機能】デバッグパネルのUI設計 */
+.debug-panel {
+  position: absolute; right: 20px; bottom: 20px; width: 340px; background: rgba(30, 41, 59, 0.95);
+  color: #0fcc83; border-radius: 8px; border: 1px solid #334155; box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+  z-index: 5000; font-family: monospace; font-size: 11px; display: flex; flex-direction: column; overflow: hidden;
+  transition: height 0.3s ease; height: 32px;
+}
+.debug-panel.expanded { height: 400px; }
+.debug-hdr {
+  background: #0f172a; padding: 8px 12px; color: #f8fafc; font-weight: bold;
+  display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none;
+}
+.debug-body { padding: 10px; display: flex; flex-direction: column; gap: 10px; flex: 1; overflow: hidden; }
+.debug-row { display: flex; gap: 6px; }
+.debug-btn {
+  flex: 1; padding: 6px; background: #334155; color: #f8fafc; border: none;
+  border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: bold; font-family: monospace;
+}
+.debug-btn:hover { background: #475569; }
+.debug-btn.danger { background: #991b1b; color: #fecaca; }
+.debug-btn.danger:hover { background: #b91c1c; }
+.debug-console {
+  background: #020617; border: 1px solid #1e293b; padding: 6px; border-radius: 4px;
+  height: 90px; overflow-y: auto; color: #38bdf8; white-space: pre-wrap; word-break: break-all;
+}
+.debug-json-view {
+  background: #020617; border: 1px solid #1e293b; padding: 6px; border-radius: 4px;
+  flex: 1; overflow-y: auto; color: #a7f3d0; white-space: pre;
+}
+
+.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 2000; padding: 20px; }
+.modal-overlay.open { display: flex; }
+.modal-window { background: #fff; border-radius: 8px; width: 100%; max-width: 850px; height: 90vh; max-height: 750px; display: flex; flex-direction: column; box-shadow: 0 4px 20px rgba(0,0,0,0.15); overflow: hidden; }
+.modal-hdr { padding: 16px; background: #f8f9fa; border-bottom: 1px solid #eee; font-weight: bold; }
+.modal-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; gap: 20px; }
+.modal-left { flex: 1; display: flex; flex-direction: column; gap: 12px; }
+.modal-right { width: 450px; display: flex; flex-direction: column; gap: 8px; }
+.form-grp { display: flex; flex-direction: column; gap: 4px; }
+.form-grp label { font-size: 12px; font-weight: bold; color: #475569; }
+.form-grp input, .form-grp select, .form-grp textarea { padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; outline: none; }
+.form-grp textarea { resize: none; height: 70px; }
+#mini-map { width: 100%; flex: 1; min-height: 380px; border: 1px solid #cbd5e1; border-radius: 4px; }
+#coord-info { font-size: 11px; background: #f1f5f9; padding: 6px; border-radius: 4px; }
+.modal-ftr { padding: 12px 16px; background: #f8f9fa; border-top: 1px solid #eee; display: flex; justify-content: end; gap: 10px; }
+.btn-sec { padding: 8px 16px; background: #e2e8f0; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+.btn-submit { padding: 8px 20px; background: #27ae60; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+#loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #fff; z-index: 9999; display: flex; align-items: center; justify-content: center; font-weight: bold; color: #555; }
+</style>
+</head>
+<body>
+
+<div id="loading">システム及び出没地図をロード中...</div>
+
+<div id="app" style="display:none;">
+  <div class="header">
+    <h1>秋田県：天気＆安全対策情報「ベアウェザー」</h1>
+    <div class="header-date" id="current-date">----年--月--日</div>
+  </div>
+  
+  <div class="dashboard">
+    <div class="weather-bear-alert" id="alert-bar">
+      <div class="w-card">
+        <div style="font-size: 28px; margin-right: 5px;" id="weather-icon">☁️</div>
+        <div class="w-info">
+          <div class="w-temp" id="weather-temp">--°C</div>
+          <div class="w-text" id="weather-text">読込中...</div>
+        </div>
+      </div>
+      <div class="alert-message">
+        <div class="alert-title">⚠️ 【熊災害アラート】 本日：警戒レベル「中」</div>
+        <div class="alert-desc" id="dynamic-alert-text">直近の出没状況を確認し、十分にご注意ください。</div>
+      </div>
+    </div>
+    
+    <div class="content-body">
+      <div class="sidebar">
+        <div class="weather-advice">
+          <h3>💡 本日の気象連動アドバイス</h3>
+          <p id="weather-advice-text">周囲の状況に注意し、山林付近や見通しの悪い場所に入る際は音の出るものを携帯してください。</p>
+        </div>
+        
+        <div class="weather-forecast-container">
+          <div class="weather-forecast-title">⏳ 3時間ごとの天気予報（直近24時間）</div>
+          <div class="weather-timeline" id="weather-timeline">
+            <div style="font-size:12px; color:#94a3b8; padding:5px;">予報データを読み込み中...</div>
+          </div>
+        </div>
+        
+        <div class="filter-box">
+          <div id="type-filters">
+            <div class="fbtn on" data-t="all">すべて</div>
+            <div class="fbtn" data-t="目撃">目撃</div>
+            <div class="fbtn" data-t="人身被害">人身</div>
+            <div class="fbtn" data-t="気象災害">災害</div>
+          </div>
+          <select class="select-ctrl" id="year-select">
+            <option value="all">すべての年</option>
+          </select>
+        </div>
+        
+        <div class="list-hdr" id="list-count">0件の情報</div>
+        <div class="list-scroll" id="sightings-list"></div>
+        
+        <div class="action-panel">
+          <button class="btn-primary" id="open-modal">➕ 情報を投稿する</button>
+          <button class="btn-export" id="export-json">💾 ファイルを保存</button>
+        </div>
+      </div>
+      
+      <div id="map"></div>
+    </div>
+  </div>
+
+  <div class="debug-panel" id="debug-panel">
+    <div class="debug-hdr" id="debug-toggle">
+      <span>🛠️ デバッグ・データ管理ツール</span>
+      <span id="debug-arrow">▲</span>
+    </div>
+    <div class="debug-body">
+      <div class="debug-row">
+        <button class="debug-btn" id="db-mock-bear">🐻 擬似熊データ挿入</button>
+        <button class="debug-btn" id="db-mock-disaster">🌧️ 擬似災害データ挿入</button>
+      </div>
+      <div class="debug-row">
+        <button class="debug-btn" id="db-refresh">🔄 画面再描画</button>
+        <button class="debug-btn danger" id="db-clear">⚠️ メモリ全クリア</button>
+      </div>
+      <div style="font-weight:bold;color:#f8fafc;margin-top:2px;">📋 動作ログ履歴:</div>
+      <div class="debug-console" id="debug-console"></div>
+      <div style="font-weight:bold;color:#f8fafc;">💎 現在の配列データ (data.json用プレビュー):</div>
+      <div class="debug-json-view" id="debug-json-view">[]</div>
+    </div>
+  </div>
+
+</div>
+
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal-window">
+    <div class="modal-hdr">出没・災害情報の報告</div>
+    <div class="modal-body">
+      <div class="modal-left">
+        <div class="form-grp">
+          <label>情報種別</label>
+          <select id="f-type">
+            <option value="目撃">熊の目撃</option>
+            <option value="人身被害">熊の人身被害</option>
+            <option value="痕跡">熊の痕跡・その他</option>
+            <option value="気象災害">気象災害（大雨・冠水・土砂崩れ等）</option>
+          </select>
+        </div>
+        <div class="form-grp">
+          <label>市町村</label>
+          <select id="f-city">
+            <option value="">選択してください</option>
+            <option value="秋田市">秋田市</option><option value="能代市">能代市</option>
+            <option value="横手市">横手市</option><option value="大館市">大館市</option>
+            <option value="男鹿市">男鹿市</option><option value="湯沢市">湯沢市</option>
+            <option value="鹿角市">鹿角市</option><option value="由利本荘市">由利本荘市</option>
+            <option value="潟上市">潟上市</option><option value="大仙市">大仙市</option>
+            <option value="北秋田市">北秋田市</option><option value="にかほ市">にかほ市</option>
+            <option value="仙北市">仙北市</option><option value="小坂町">小坂町</option>
+            <option value="上小阿仁村">上小阿仁村</option><option value="藤里町">藤里町</option>
+            <option value="三種町">三種町</option><option value="八峰町">八峰町</option>
+            <option value="五城目町">五城目町</option><option value="八郎潟町">八郎潟町</option>
+            <option value="井川町">井川町</option><option value="大潟村">大潟村</option>
+            <option value="美郷町">美郷町</option><option value="羽後町">羽後町</option>
+            <option value="東成瀬村">東成瀬村</option>
+          </select>
+        </div>
+        <div class="form-grp">
+          <label>詳しい場所（町名、番地等）※地図クリックで自動取得</label>
+          <input type="text" id="f-loc" placeholder="地図をクリックすると自動入力されます">
+        </div>
+        <div class="form-grp">
+          <label>発生日時</label>
+          <input type="datetime-local" id="f-date">
+        </div>
+        <div class="form-grp">
+          <label>状況・詳細</label>
+          <textarea id="f-note" placeholder="熊の大きさや、道路の冠水・通行止めの状況などを記載してください"></textarea>
+        </div>
+      </div>
+      <div class="modal-right">
+        <label style="font-size:12px;font-weight:bold;color:#475569;">地図上で場所を指定 (必須)</label>
+        <div id="coord-info">地図をクリックして発生地点を指定してください</div>
+        <div id="mini-map"></div>
+      </div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn-sec" id="cancel-btn">キャンセル</button>
+      <button class="btn-submit" id="submit-btn">投稿を反映</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.cluster.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
+
+<script>
+let CSV_DATA = [];
+let map = null, markers = null, miniMap = null, miniMarker = null, userGpsMarker = null;
+let currentFilterType = 'all';
+let currentFilterYear = 'all';
+let nextId = 1;
+let pendingLat = null, pendingLng = null;
+let mapInitialized = false;
+
+// 🔴 デバッグ用ログ出力関数
+function logDebug(msg) {
+  const consoleEl = document.getElementById('debug-console');
+  if (consoleEl) {
+    const timeStr = new Date().toLocaleTimeString();
+    consoleEl.innerHTML += `[${timeStr}] ${msg}\n`;
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+  console.log(`[DEBUG] ${msg}`);
+}
+
+// 🔴 デバッグ用データビューアー更新関数
+function updateDebugJsonView() {
+  const jsonViewEl = document.getElementById('debug-json-view');
+  if (jsonViewEl) {
+    // 最初の5件だけ整形して見せる（全件出すとブラウザが重くなるため）
+    const previewData = CSV_DATA.slice(0, 5);
+    let txt = JSON.stringify(previewData, null, 2);
+    if (CSV_DATA.length > 5) {
+      txt += `\n... ほか計 ${CSV_DATA.length - 5} 件のデータが存在します`;
+    }
+    jsonViewEl.textContent = txt;
+  }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  const now = new Date();
+  document.getElementById('current-date').textContent = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日`;
+
+  logDebug("初期化開始: data.json のフェッチ中...");
+
+  fetch('data.json')
+    .then(res => {
+      if(!res.ok) throw new Error("data.jsonが見つかりません。デフォルトの空配列を使用します。");
+      return res.json();
+    })
+    .then(bearData => {
+      CSV_DATA = Array.isArray(bearData) ? bearData : [];
+      logDebug(`data.json 読込成功: ${CSV_DATA.length} 件取得`);
+      initSystem();
+    })
+    .catch(err => {
+      logDebug(`警告: ${err.message}`);
+      CSV_DATA = [];
+      initSystem();
+    });
+});
+
+function initSystem() {
+  const ids = CSV_DATA.map(d => d && d["出没情報ID"] ? parseInt(d["出没情報ID"]) : 0).filter(id => !isNaN(id));
+  if (ids.length > 0) nextId = Math.max(...ids) + 1;
+  logDebug(`次回発行のユニークID: ${nextId}`);
+
+  if (navigator.geolocation) {
+    logDebug("GPS現在地をリクエスト中...");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        logDebug("GPS位置取得完了");
+        finishSetup({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      },
+      () => {
+        logDebug("GPS取得失敗または拒否。デフォルト位置で起動");
+        finishSetup(null);
+      },
+      { enableHighAccuracy: true, timeout: 3500, maximumAge: 0 }
+    );
+  } else {
+    finishSetup(null);
+  }
+}
+
+function finishSetup(gpsCoords) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+  
+  initMapContainer(gpsCoords);
+  initEvents();
+  initDebugEvents(); // デバッグイベント起動
+  setupYearSelect();
+  render();
+  updateDebugJsonView();
+}
+
+function initMapContainer(gpsCoords) {
+  if (mapInitialized) return;
+  try {
+    const southWest = L.latLng(38.5000, 138.8000);
+    const northEast = L.latLng(40.8000, 141.5000);
+    const akitaBounds = L.latLngBounds(southWest, northEast);
+
+    const baseTile = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', {
+      attribution: '国土地理院', maxZoom: 18
+    });
+
+    let startLat = 39.7200, startLng = 140.1000, startZoom = 9;
+    if (gpsCoords) {
+      startLat = gpsCoords.lat; startLng = gpsCoords.lng; startZoom = 14;
+    }
+
+    map = L.map('map', { 
+      zoomControl: false, minZoom: 7, maxZoom: 18, maxBounds: akitaBounds, maxBoundsViscosity: 0.5,
+      layers: [baseTile]
+    }).setView([startLat, startLng], startZoom);
+
+    // 地図の移動が終わるたびに中心地の天気をデバッグロード
+    map.on('moveend', () => {
+      const center = map.getCenter();
+      loadWeatherData(center.lat, center.lng, "表示エリア周辺");
+    });
+
+    if (gpsCoords) {
+      userGpsMarker = L.circleMarker([startLat, startLng], {
+        radius: 8, fillColor: '#3498db', color: '#fff', weight: 2, opacity: 1, fillOpacity: 0.8
+      }).addTo(map).bindPopup("<b>あなたの現在地</b>");
+      loadWeatherData(startLat, startLng, "現在地周辺");
+    } else {
+      loadWeatherData(39.7200, 140.1000, "秋田市周辺");
+    }
+
+    L.control.zoom({ position: 'topleft' }).addTo(map);
+
+    const GpsControl = L.Control.extend({
+      options: { position: 'topleft' },
+      onAdd: function() {
+        const btn = L.DomUtil.create('div', 'leaflet-control-gps');
+        btn.innerHTML = '📍 現在地を表示';
+        btn.onclick = function(e) { e.stopPropagation(); moveToCurrentLocation(); };
+        return btn;
+      }
+    });
+    map.addControl(new GpsControl());
+
+    markers = L.markerClusterGroup({ spiderfyOnMaxZoom: true, showCoverageOnHover: false, zoomToBoundsOnClick: true });
+    map.addLayer(markers);
+    
+    mapInitialized = true;
+    map.invalidateSize();
+    logDebug("Leafletメインマップ初期化完了");
+  } catch (e) { logDebug(`エラー: マップ初期化に失敗しました (${e.message})`); }
+}
+
+function moveToCurrentLocation() {
+  if (!navigator.geolocation) { alert("非対応ブラウザです"); return; }
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const lat = position.coords.latitude; const lng = position.coords.longitude;
+      map.setView([lat, lng], 14);
+      if (userGpsMarker) userGpsMarker.remove();
+      userGpsMarker = L.circleMarker([lat, lng], {
+        radius: 8, fillColor: '#3498db', color: '#fff', weight: 2, opacity: 1, fillOpacity: 0.8
+      }).addTo(map).bindPopup("<b>あなたの現在地</b>").openPopup();
+      loadWeatherData(lat, lng, "現在地周辺");
+      logDebug("現在地への移動を実行しました");
+    },
+    () => { alert("位置特定できませんでした"); },
+    { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+  );
+}
+
+function parseWeatherCode(code) {
+  if (code === 0 || code === 1) return { text: "晴れ", icon: "☀️" };
+  if (code >= 2 && code <= 3) return { text: "曇り", icon: "☁️" };
+  if (code >= 51 && code <= 67) return { text: "雨", icon: "🌧️" };
+  if (code >= 71 && code <= 77) return { text: "雪", icon: "❄️" };
+  if (code >= 80 && code <= 82) return { text: "にわか雨", icon: "🌦️" };
+  if (code >= 95 && code <= 99) return { text: "雷雨", icon: "⛈️" };
+  return { text: "曇り", icon: "☁️" };
+}
+
+function loadWeatherData(lat, lng, areaLabel) {
+  const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true&hourly=temperature_2m,weathercode,precipitation_probability,precipitation,wind_speed_10m,snowfall&timezone=Asia%2FTokyo`;
+  fetch(weatherUrl)
+    .then(res => res.json())
+    .then(data => {
+      updateWeatherAndAlertUI(data, areaLabel);
+      updateForecastTimeline(data);
+    })
+    .catch(() => {
+      logDebug("気象APIの取得に失敗しました");
+    });
+}
+
+function updateWeatherAndAlertUI(data, areaLabel) {
+  let wText = "不明"; let wIcon = "☁️"; let tempText = "--";
+  let advice = "周囲の状況に注意し、山林付近や見通しの悪い場所に入る際は音の出るものを携帯してください。";
+  let alertBarColor = "linear-gradient(135deg, #7f8c8d 0%, #95a5a6 100%)";
+  let levelStr = "本日：警戒レベル「中」";
+  let descText = "直近の出没状況・災害情報を確認し、十分にご注意ください。";
+
+  if (data && data.current_weather) {
+    const cur = data.current_weather;
+    tempText = cur.temperature;
+    const info = parseWeatherCode(cur.weathercode);
+    wText = info.text; wIcon = info.icon;
+    
+    if (cur.weathercode >= 95) {
+      advice = "⚠️【緊急：気象災害警戒】落雷と激しい突風の危険があります。さらに激しい雨音により熊もお互いの存在に気付けず、遭遇確率が跳ね上がります。屋内へ退避してください。";
+      alertBarColor = "linear-gradient(135deg, #c0392b 0%, #e74c3c 100%)";
+      levelStr = "⚠️【緊急】大雨・落雷・突風警報発令級";
+      descText = "周囲の音が遮断され、突発的な遭遇や河川冠水のリスクが非常に高まっています。";
+    } else if (cur.weathercode >= 61) {
+      advice = "🌧️【気象災害・二次災害注意】大雨による土砂災害や視界不良に注意。雨音で熊の足音が聞こえなくなるため、山林付近の歩行は避けてください。";
+      alertBarColor = "linear-gradient(135deg, #d35400 0%, #e67e22 100%)";
+      levelStr = "本日：大雨・二次災害警戒モード";
+      descText = "視界と聴覚が制限されています。冠水しやすい道路や土砂崩れ警戒区域、熊出没地点に近づかないでください。";
+    } else if (cur.weathercode === 0 || cur.weathercode === 1) {
+      advice = "本日は視界良好ですが、朝方や夕方の薄暗い時間帯は熊の活動が活バツになります。山林に入る際は存在を知らせる対策を徹底してください。";
+      alertBarColor = "linear-gradient(135deg, #2c3e50 0%, #2980b9 100%)";
+      levelStr = "本日：通常警戒（天候安定）";
+      descText = "気象災害のリスクは低いですが、出没履歴マップを確認して安全対策を行ってください。";
+    }
+  }
+
+  document.getElementById('weather-temp').textContent = `${tempText}°C`;
+  document.getElementById('weather-icon').textContent = wIcon;
+  document.getElementById('weather-text').textContent = `${areaLabel}: ${wText}`;
+  document.getElementById('weather-advice-text').textContent = advice;
+  document.getElementById('alert-bar').style.background = alertBarColor;
+  document.querySelector('.alert-title').innerHTML = levelStr;
+  document.getElementById('dynamic-alert-text').textContent = descText;
+}
+
+function updateForecastTimeline(data) {
+  const timelineEl = document.getElementById('weather-timeline');
+  if (!data || !data.hourly) {
+    timelineEl.innerHTML = `<div style="font-size:12px; color:#94a3b8; padding:5px;">予報なし</div>`;
+    return;
+  }
+  const hourly = data.hourly; const times = hourly.time; const temps = hourly.temperature_2m; const codes = hourly.weathercode;
+  const nowStr = new Date().toISOString().substring(0, 13); 
+  let startIndex = 0;
+  for (let i = 0; i < times.length; i++) { if (times[i].startsWith(nowStr)) { startIndex = i; break; } }
+
+  const fragment = document.createDocumentFragment();
+  for (let k = 0; k < 8; k++) {
+    const idx = startIndex + (k * 3); if (idx >= times.length) break;
+    const displayTime = times[idx].split('T')[1].substring(0,5);
+    const wInfo = parseWeatherCode(codes[idx]); const currentTemp = temps[idx];
+    const pop = hourly.precipitation_probability ? hourly.precipitation_probability[idx] : 0;
+    const precip = hourly.precipitation ? hourly.precipitation[idx] : 0;
+    const wind = hourly.wind_speed_10m ? Math.round(hourly.wind_speed_10m[idx]) : 0;
+
+    const card = document.createElement('div');
+    card.className = 'forecast-item';
+    card.innerHTML = `
+      <div class="forecast-time">${displayTime}</div>
+      <div class="forecast-icon">${wInfo.icon}</div>
+      <div class="forecast-temp">${currentTemp}°C</div>
+      <div class="weather-details-mini">
+        <div class="w-info-mini pop">☔${pop}%</div>
+        <div class="w-info-mini rain">💧${precip.toFixed(1)}mm</div>
+        <div class="w-info-mini wind">🍃${wind}m/s</div>
+      </div>
+    `;
+    fragment.appendChild(card);
+  }
+  timelineEl.innerHTML = ''; timelineEl.appendChild(fragment);
+}
+
+function setupYearSelect() {
+  const years = new Set();
+  for (let i = 0; i < CSV_DATA.length; i++) {
+    const d = CSV_DATA[i];
+    if (d && d["目撃日時"]) {
+      const dtStr = String(d["目撃日時"]).trim();
+      const y = dtStr.split('/')[0] || dtStr.split('-')[0];
+      if (y && y.length === 4) years.add(y);
+    }
+  }
+  const sortedYears = Array.from(years).sort((a, b) => b - a);
+  const select = document.getElementById('year-select');
+  select.innerHTML = '<option value="all">すべての年</option>';
+  sortedYears.forEach(y => {
+    const opt = document.createElement('option'); opt.value = y; opt.textContent = y + '年';
+    select.appendChild(opt);
+  });
+}
+
+function initEvents() {
+  document.querySelectorAll('#type-filters .fbtn').forEach(btn => {
+    btn.onclick = function() {
+      document.querySelectorAll('#type-filters .fbtn').forEach(b => b.className = 'fbtn');
+      currentFilterType = this.getAttribute('data-t');
+      if (currentFilterType === 'all') this.classList.add('on');
+      else if (currentFilterType === '目撃') this.classList.add('on');
+      else if (currentFilterType === '人身被害') this.classList.add('on-orange');
+      else this.classList.add('on-blue');
+      logDebug(`フィルター適用 [種別]: ${currentFilterType}`);
+      render();
+    };
+  });
+
+  document.getElementById('year-select').onchange = function() { 
+    currentFilterYear = this.value; 
+    logDebug(`フィルター適用 [年]: ${currentFilterYear}`);
+    render(); 
+  };
+  
+  document.getElementById('open-modal').onclick = () => {
+    document.getElementById('modal-overlay').classList.add('open');
+    document.getElementById('f-date').value = new Date().toISOString().substring(0,16);
+    initMiniMap();
+  };
+  document.getElementById('cancel-btn').onclick = closeModal;
+  document.getElementById('submit-btn').onclick = submitPost;
+
+  document.getElementById('export-json').onclick = function() {
+    if (CSV_DATA.length === 0) { alert("保存するデータがありません"); return; }
+    const jsonString = JSON.stringify(CSV_DATA, null, 2);
+    const blob = new Blob([jsonString], { type: "application/json;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = "data.json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    logDebug("data.json のエクスポートファイルをダウンロードしました");
+    alert("新しい『data.json』を出力しました！元のフォルダにある data.json に上書きしてください。");
+  };
+}
+
+// 🔴 【新機能】デバッグ制御用イベントの設定
+function initDebugEvents() {
+  const panel = document.getElementById('debug-panel');
+  const toggle = document.getElementById('debug-toggle');
+  const arrow = document.getElementById('debug-arrow');
+
+  // 開閉トグル
+  toggle.onclick = () => {
+    panel.classList.toggle('expanded');
+    arrow.textContent = panel.classList.contains('expanded') ? '▼' : '▲';
+  };
+
+  // 擬似熊データの挿入
+  document.getElementById('db-mock-bear').onclick = () => {
+    const center = map.getCenter();
+    const mock = {
+      "出没情報ID": String(nextId++),
+      "情報種別": "目撃",
+      "市町村": "秋田市",
+      "地番情報": "秋田県秋田市(デバッグ自動生成)",
+      "目撃日時": new Date().toLocaleString('ja-JP').replace(/\//g, '-'),
+      "獣種": "ツキノワグマ", "性別": "不明", "単独か親子": "単独", "頭数": "1",
+      "目撃時の状況": "【デバッグ】システム開発テスト用の擬似データです。",
+      "x(緯度)": String(center.lat + (Math.random() - 0.5) * 0.02),
+      "y(経度)": String(center.lng + (Math.random() - 0.5) * 0.02)
+    };
+    CSV_DATA.unshift(mock);
+    logDebug(`デバッグデータ生成 [熊目撃] (ID: ${mock.出没情報ID})`);
+    setupYearSelect(); render(); updateDebugJsonView();
+  };
+
+  // 擬似災害データの挿入
+  document.getElementById('db-mock-disaster').onclick = () => {
+    const center = map.getCenter();
+    const mock = {
+      "出没情報ID": String(nextId++),
+      "情報種別": "気象災害(大雨冠水)",
+      "市町村": "秋田市",
+      "地番情報": "秋田県秋田市(デバッグ災害テスト)",
+      "目撃日時": new Date().toLocaleString('ja-JP').replace(/\//g, '-'),
+      "獣種": "なし", "性別": "なし", "単独か親子": "なし", "頭数": "0",
+      "目撃時の状況": "【デバッグ】大雨による冠水・道路通行止めシミュレーション。",
+      "x(緯度)": String(center.lat + (Math.random() - 0.5) * 0.02),
+      "y(経度)": String(center.lng + (Math.random() - 0.5) * 0.02)
+    };
+    CSV_DATA.unshift(mock);
+    logDebug(`デバッグデータ生成 [気象災害] (ID: ${mock.出没情報ID})`);
+    setupYearSelect(); render(); updateDebugJsonView();
+  };
+
+  // 画面再描画
+  document.getElementById('db-refresh').onclick = () => {
+    logDebug("デバッグ: 画面の手動再レンダリングを実行");
+    render(); updateDebugJsonView();
+  };
+
+  // データ全削除
+  document.getElementById('db-clear').onclick = () => {
+    if (confirm("現在メモリ空間に保持しているすべてのデータ配列を完全に空にしますか？\n(data.json本体は上書き保存するまで消えません)")) {
+      CSV_DATA = [];
+      nextId = 1;
+      logDebug("デバッグ: メモリ内の配列データを全消去しました。");
+      setupYearSelect(); render(); updateDebugJsonView();
+    }
+  };
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+  document.getElementById('f-loc').value = ''; document.getElementById('f-city').value = ''; document.getElementById('f-note').value = '';
+  if (miniMarker) { miniMarker.remove(); miniMarker = null; }
+  pendingLat = null; pendingLng = null;
+}
+
+function initMiniMap() {
+  setTimeout(() => {
+    if (!miniMap) {
+      const sW = L.latLng(38.5000, 138.8000); const nE = L.latLng(40.8000, 141.5000);
+      miniMap = L.map('mini-map', { attributionControl: false, zoomControl: true, minZoom: 7, maxZoom: 18, maxBounds: L.latLngBounds(sW, nE), maxBoundsViscosity: 0.5 })
+      .setView([39.7200, 140.1000], 9);
+      L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(miniMap);
+
+      miniMap.on('click', e => {
+        pendingLat = e.latlng.lat; pendingLng = e.latlng.lng;
+        document.getElementById('coord-info').innerHTML = `緯度: ${pendingLat.toFixed(5)} / 経度: ${pendingLng.toFixed(5)} (住所逆検索中...)`;
+        if (miniMarker) miniMarker.remove();
+        miniMarker = L.marker([pendingLat, pendingLng]).addTo(miniMap);
+
+        fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${pendingLat}&lon=${pendingLng}&accept-language=ja`, {
+          headers: { 'User-Agent': 'BearWeatherApp/1.0' }
+        })
+        .then(res => res.json())
+        .then(geoData => {
+          if (geoData && geoData.address) {
+            const addr = geoData.address;
+            let detectedCity = addr.city || addr.town || addr.village || "";
+            let detectedLoc = (addr.suburb || "") + (addr.neighbourhood || "") + (addr.road || "") + (addr.house_number || "");
+            const cities = ["秋田市","能代市","横手市","大館市","男鹿市","湯沢市","鹿角市","由利本荘市","潟上市","大仙市","北秋田市","にかほ市","仙北市"];
+            let matched = cities.find(c => detectedCity.includes(c) || detectedLoc.includes(c)) || "秋田市";
+            document.getElementById('f-city').value = matched;
+            document.getElementById('f-loc').value = detectedLoc || "付近";
+            document.getElementById('coord-info').innerHTML = `<span style="color:#27ae60;font-weight:bold;">自動検知: 秋田県${matched}${detectedLoc}</span>`;
+          }
+        }).catch(() => {
+          document.getElementById('coord-info').innerHTML = `位置: 緯度 ${pendingLat.toFixed(5)} (手動入力可能)`;
+        });
+      });
+    } else { miniMap.invalidateSize(); }
+  }, 150);
+}
+
+function submitPost() {
+  const loc = document.getElementById('f-loc').value.trim();
+  const city = document.getElementById('f-city').value;
+  if (!loc || !city || !pendingLat) { alert('地図上で場所を指定してください'); return; }
+  
+  const entry = {
+    "出没情報ID": String(nextId++),
+    "情報種別": document.getElementById('f-type').value,
+    "市町村": city, 
+    "地番情報": '秋田県' + city + loc,
+    "目撃日時": document.getElementById('f-date').value.replace('T', ' ').substring(0,16),
+    "獣種": 'ツキノワグマ', "性別": '不明', "単独か親子": '単独', "頭数": '1',
+    "目撃時の状況": document.getElementById('f-note').value.trim() || '（手動投稿情報）',
+    "x(緯度)": String(pendingLat), "y(経度)": String(pendingLng)
+  };
+
+  CSV_DATA.unshift(entry);
+  logDebug(`手動投稿成功 (ID: ${entry.出没情報ID})`);
+  closeModal(); setupYearSelect(); render(); updateDebugJsonView();
+  alert("画面に反映しました。保存ファイルを作成する場合は右下の「💾 ファイルを保存」を押してください。");
+}
+
+function render() {
+  if (!markers || !map) return;
+  markers.clearLayers();
+  const listEl = document.getElementById('sightings-list');
+  const fragment = document.createDocumentFragment();
+
+  const filtered = CSV_DATA.filter(d => {
+    if (!d) return false;
+    const typeStr = d["情報種別"] ? String(d["情報種別"]) : '';
+    const tMatch = (currentFilterType === 'all' || typeStr.indexOf(currentFilterType) === 0);
+    let yMatch = true;
+    if (currentFilterYear !== 'all') {
+      const dtStr = d["目撃日時"] ? String(d["目撃日時"]).trim() : '';
+      yMatch = dtStr.indexOf(currentFilterYear) === 0;
+    }
+    return tMatch && yMatch;
+  });
+
+  document.getElementById('list-count').textContent = `該当データ: ${filtered.length}件`;
+
+  filtered.forEach(d => {
+    try {
+      if (!d || !d["x(緯度)"] || !d["y(経度)"]) return;
+      const latNum = parseFloat(d["x(緯度)"]); const lngNum = parseFloat(d["y(経度)"]);
+      if (isNaN(latNum) || isNaN(lngNum)) return;
+
+      const marker = L.marker([latNum, lngNum]);
+      const typeStr = d["情報種別"] || '目撃';
+      const cleanTagName = typeStr.split('(')[0];
+      const cityStr = d["市町村"] || '';
+      const addressStr = d["地番情報"] ? String(d["地番情報"]).replace('秋田県' + cityStr, '') : '';
+      
+      marker.bindPopup(`
+        <div class="popup-type tag-${cleanTagName}">${typeStr}</div>
+        <div class="popup-title">${cityStr} ${addressStr}</div>
+        <div class="popup-meta">
+          <b>日時:</b> ${d["目撃日時"] || '不明'}<br>
+          <b>状況・内容:</b> ${d["目撃時の状況"] || ''}
+        </div>
+      `);
+      markers.addLayer(marker);
+
+      const item = document.createElement('div');
+      item.className = 'sitem';
+      const dtStr = d["目撃日時"] ? String(d["目撃日時"]).split(' ')[0] : '不明';
+      const noteStr = d["目撃時の状況"] ? String(d["目撃時の状況"]) : '';
+      
+      item.innerHTML = `
+        <div class="sitem-title">${cityStr} (${dtStr})</div>
+        <div class="sitem-meta">${noteStr.substring(0, 34)}${noteStr.length > 34 ? '...' : ''}</div>
+        <span class="type-tag tag-${cleanTagName}">${typeStr}</span>
+      `;
+      item.onclick = () => { map.setView([latNum, lngNum], 14); setTimeout(() => { marker.openPopup(); }, 200); };
+      fragment.appendChild(item);
+    } catch (e) { console.warn(e); }
+  });
+  listEl.innerHTML = ''; listEl.appendChild(fragment);
+}
+</script>
+</body>
+</html>
