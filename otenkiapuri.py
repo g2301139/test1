@@ -2,6 +2,9 @@ import subprocess
 import random
 import requests
 import time
+import os
+import tkinter as tk  # アタシを全画面に出すためのパーツよ♡
+from PIL import Image, ImageTk  # 画像を画面サイズに引き伸ばすパーツよ♡
 
 # --- メスガキ語録セクション ♡ ---
 def get_mesugaki_phrase():
@@ -29,10 +32,59 @@ def get_mesugaki_phrase():
         "kuma": random.choice(kuma_msg)
     }
 
-# --- 1. 情報を1個ずつのリストにして取ってくる関数 ---
+# --- 1. アタシを「画面いっぱい」に全画面表示させる関数 ♡ ---
+def show_mesugaki_fullscreen():
+    img_path = "mesugaki_ok.png"
+    
+    if not os.path.exists(img_path):
+        print(f"⚠️ ざぁ〜こ♡ 画像ファイルがないじゃない！ '{img_path}' を用意しなさいよ！")
+        return
+
+    # tkinterで全画面ウィンドウを作るわ
+    root = tk.Tk()
+    root.title("♡ アタシが画面をジャックしてあげたわよ ♡")
+    
+    # 画面の枠（上部の閉じるボタンとか）を完全に消し去る命令よ！
+    root.overrideredirect(True)
+    
+    # おじさんのモニターの横幅と縦幅を自動で測るわ
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    
+    # ウィンドウのサイズを画面ぴったりに設定！
+    root.geometry(f"{screen_width}x{screen_height}+0+0")
+    root.attributes("-topmost", True)  # 最前面に強制表示♡
+
+    # 画像をおじさんの画面サイズに合わせてぴったり引き伸ばすわ！
+    try:
+        pil_image = Image.open(img_path)
+        # 画面いっぱいにリサイズ（綺麗に引き伸ばす設定よ♡）
+        pil_image_resized = pil_image.resize((screen_width, screen_height), Image.Resampling.LANCZOS)
+        tk_image = ImageTk.PhotoImage(pil_image_resized)
+    except Exception as e:
+        print(f"⚠️ 画像の全画面拡大に失敗したわ！ざぁ〜こ♡: {e}")
+        root.destroy()
+        return
+
+    # 背景を黒にして、画像を画面の真ん中に貼り付けるわ
+    canvas = tk.Canvas(root, width=screen_width, height=screen_height, bg="black", highlightthickness=0)
+    canvas.pack()
+    canvas.create_image(screen_width // 2, screen_height // 2, image=tk_image)
+
+    # おじさんがビックリして消したくなった時のために、Escキーで閉じれるようにしてあげる♡
+    root.bind("<Escape>", lambda e: root.destroy())
+
+    # 10秒経ったら、おじさんを現実に戻すために自動で閉じてあげるわ♡
+    root.after(10000, lambda: root.destroy())
+
+    # 画面ジャック実行！
+    root.mainloop()
+
+# --- 2. 情報をリストにして取ってくる関数 ---
 def get_mesugaki_info_list():
     phrase = get_mesugaki_phrase()
     results = []
+    has_warning = False  # 警報フラグ
     
     # ① 最初の挨拶
     results.append(("♡ 構ってちゃんのおじさんへ ♡", phrase['aisatsu']))
@@ -61,6 +113,7 @@ def get_mesugaki_info_list():
         if warnings:
             msg = ", ".join(list(set(warnings)))
             results.append(("📢 大変大変！ 📢", f"「{msg}」が出てるわ。無茶してアタシを悲しませないでよね？♡"))
+            has_warning = True
         else:
             results.append(("✅ 警報チェック ✅", "警報はナシ！おじさんが無事でつまんないわ♡"))
     except:
@@ -69,34 +122,31 @@ def get_mesugaki_info_list():
     # ④ 熊情報
     results.append(("🐻 熊さん情報 🐻", phrase['kuma']))
     
-    return results
+    return results, has_warning
 
-# --- 2. エラーも文字化けも絶対に起こさないWindows通知関数 ---
+# --- 3. 安全にWindows通知を出す関数（パワーシェル直撃版） ---
 def win_notification_safe(title, message):
-    # バグの元になるクォーテーションを綺麗にお掃除するわ
     t = title.replace("'", "").replace('"', "")
     m = message.replace("'", "").replace('"', "")
-    
-    # おじさんが改行ミスしないように、1本のシンプルな文字列に結合！
     ps_cmd = f"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [void] [System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); $n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = [System.Drawing.SystemIcons]::Information; $n.BalloonTipIcon = 'Info'; $n.BalloonTipTitle = '{t}'; $n.BalloonTipText = '{m}'; $n.Visible = $true; $n.ShowBalloonTip(10000);"
-    
-    # パワーシェルを安全に呼び出すわよ
-    subprocess.Popen(
-        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    )
+    subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 if __name__ == "__main__":
     print("--------------------------------------------------")
-    print("今度こそ完璧！1個ずつ順番に通知を飛ばすわよ！")
+    print("アタシの防災＆全画面ジャックシステム、起動！")
     print("--------------------------------------------------")
     
-    notification_list = get_mesugaki_info_list()
+    notification_list, is_warning_present = get_mesugaki_info_list()
     
-    # 2.5秒おきに合計4回、きれいに分けて通知するわ♡
+    # 2.5秒おきに合計4回、個別に通知を飛ばすわよ♡
     for current_title, current_msg in notification_list:
         win_notification_safe(current_title, current_msg)
         time.sleep(2.5)
         
-    print("コンソールも真っ白（エラーなし）！大成功よ、おじさん♡")
+    print("通知完了！エラーも文字化けもナシよ！")
+    
+    # 警報がなければ、画面いっぱいにおじさんを煽りに行くわよ！
+    if not is_warning_present:
+        print("平和だから、アタシが全画面をジャックしてあげたわよ！ざぁ〜こ♡")
+        time.sleep(1.0)
+        show_mesugaki_fullscreen()
