@@ -1,4 +1,6 @@
 # 起動する前にコンソールにpip install foliumを貼り付けてから実行し, リセットしてからプログラムを実行する
+import streamlit as st
+from streamlit_folium import st_folium
 import folium
 from folium.plugins import Geocoder  
 import os
