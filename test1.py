@@ -1,13 +1,15 @@
+from flask import Flask
 import requests
 import folium
 from folium.features import DivIcon
 from folium import Popup
-import webbrowser
-import os
 import json
 import time
 from datetime import datetime, timedelta
-#!pip install foliumをコンソールに
+
+# Flaskアプリの準備
+app = Flask(__name__)
+
 # 秋田県全13市の緯度・経度データ
 AKITA_CITIES = {
     "秋田市": {"lat": 39.7186, "lon": 140.1023},
@@ -37,7 +39,9 @@ def get_weather_icon(code):
     elif 95 <= code <= 99: return "⛈️"
     else: return "❓"
 
-def create_future_weather_map():
+# サイトのURL（今回はトップページ '/'）にアクセスされた時の処理
+@app.route('/')
+def index():
     print("気象データを取得しています...")
     
     headers = {
@@ -78,24 +82,18 @@ def create_future_weather_map():
                                    "temperature_2m_max": ["--"]*7, "temperature_2m_min": ["--"]*7}} 
                         for _ in AKITA_CITIES]
 
-    # 3. 雨雲レーダーの時間データ取得（気象庁メイン ＋ RainViewer予備）
-    print("気象庁サーバーからレーダーデータを探索しています...")
+    # 3. 雨雲レーダーの時間データ取得
     js_urls = []
     js_labels = []
-    
     all_times = {}
     prods_to_try = ["nowc", "prca", "rasrf"]
     fnames_to_try = ["targetTimes_N1.json", "targetTimes_N2.json", "targetTimes_N3.json", "targetTimes.json"]
-    
-    # 【対策1】キャッシュバスティング用のタイムスタンプ
     current_ts = int(time.time() * 1000)
 
     for prod in prods_to_try:
         for fname in fnames_to_try:
-            # ?_={current_ts} をつけて強制的に最新データを取得
             url = f"https://www.jma.go.jp/bosai/jmatile/data/{prod}/{fname}?_={current_ts}"
             try:
-                # 【対策2】タイムアウトを少し延ばす
                 resp = session.get(url, timeout=5)
                 if resp.status_code == 200:
                     for t in resp.json():
@@ -107,7 +105,6 @@ def create_future_weather_map():
             except Exception:
                 pass 
 
-    # 過去データを足切りして未来データにする処理
     current_time_str = None
     for t in all_times.values():
         if t["basetime"] == t["validtime"]:
@@ -141,32 +138,23 @@ def create_future_weather_map():
             
             js_labels.append(lbl)
 
-    # 【対策3】気象庁データが全滅した場合、RainViewerAPI（安定稼働の予備）へフォールバック
     if len(js_urls) == 0:
-        print("⚠️ 気象庁データの取得に失敗しました。予備のグローバルレーダー（RainViewer）を取得します...")
         try:
             rv_resp = session.get("https://api.rainviewer.com/public/weather-maps.json", timeout=5)
             if rv_resp.status_code == 200:
                 rv_data = rv_resp.json()
                 rv_host = rv_data.get("host", "https://tilecache.rainviewer.com")
-                
-                # 過去と未来(nowcast)のデータを結合
                 all_rv_times = rv_data.get("radar", {}).get("past", []) + rv_data.get("radar", {}).get("nowcast", [])
-                
                 for t_data in all_rv_times:
                     ts = t_data["time"]
-                    # UNIXタイムスタンプをJSTに変換
                     dt_jst = datetime.utcfromtimestamp(ts) + timedelta(hours=9)
-                    
                     lbl = dt_jst.strftime('%m/%d %H:%M')
                     tile_url = f"{rv_host}/v2/radar/{ts}/256/{{z}}/{{x}}/{{y}}/2/1_1.png"
-                    
                     js_labels.append(lbl)
                     js_urls.append(tile_url)
         except Exception as e:
-            print(f"予備レーダーも取得エラー: {e}")
+            pass
 
-    # それでもダメな場合の最終防波堤
     if len(js_urls) == 0:
         js_urls = [""] * 2
         js_labels = ["エラー(現在)", "エラー(未来)"]
@@ -179,10 +167,8 @@ def create_future_weather_map():
     urls_json = json.dumps(js_urls)
     labels_json = json.dumps(js_labels)
 
-    # 地図の初期化
     akita_map = folium.Map(location=[39.6, 140.1], zoom_start=8, tiles="OpenStreetMap")
 
-    # 4. UIの構築
     external_ui_html = f"""
     <div id="independent-ui" style="position: fixed; top: 15px; left: 50px; z-index: 999999; background: rgba(255,255,255,0.95); padding: 15px; border-radius: 12px; border: 3px solid #0D47A1; box-shadow: 0 4px 10px rgba(0,0,0,0.4); width: 280px; font-family: sans-serif;">
         <button id="radar-btn" style="width: 100%; background: #2196F3; color: white; border: none; padding: 12px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
@@ -320,10 +306,9 @@ def create_future_weather_map():
         
         folium.Marker(location=[coords["lat"], coords["lon"]], icon=DivIcon(html=marker_html, icon_anchor=(50, 50)), popup=Popup(popup_html, max_width=400)).add_to(akita_map)
 
-    map_filename = "akita_weather_perfect.html"
-    akita_map.save(map_filename)
-    webbrowser.open('file://' + os.path.realpath(map_filename))
-    print("マップを開きました！（キャッシュ対策・予備API対応済み）")
+    # HTMLファイルとして保存せず、ブラウザに直接描画用データ(HTML文字列)を返却します
+    return akita_map.get_root().render()
 
 if __name__ == "__main__":
-    create_future_weather_map()
+    # ローカル（自分のPC）でテスト動作用
+    app.run(host="0.0.0.0", port=5000, debug=True)
