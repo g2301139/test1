@@ -118,15 +118,12 @@ custom_smartphone_script = """
 akita_map.get_root().header.add_child(folium.Element(custom_smartphone_script))
 # ========================================================
 
+# パソコン用のライブラリ（osやwebbrowser）はもう使わないので、Streamlit用の魔法の2行を最初（1行目など）に足しておきます
+# import streamlit as st
+# from streamlit_folium import st_folium
 
-# 4. 保存先の設定（デスクトップ）
-desktop_path = os.path.expanduser("~/Desktop")                 
-file_path = os.path.join(desktop_path, "akita_gps_map.html")   
+# 画面にタイトルを表示
+st.title("🗺️ 秋田 現在地GPSマップ")
 
-# 5. 指定した場所に保存
-akita_map.save(file_path)
-
-# 6. パソコンのブラウザで開く
-webbrowser.open("file://" + file_path)
-
-print(f"✨ 右上に地図切り替えボタンが付いた、超ドアップ現在地マップを保存しました: {file_path}")
+# 魔法の一行：Streamlitの画面に地図をドカンと表示させる！
+st_folium(akita_map, width="100%", height=600)
