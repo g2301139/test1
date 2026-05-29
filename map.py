@@ -1,18 +1,52 @@
 # 起動する前にコンソールにpip install foliumを貼り付けてから実行し, リセットしてからプログラムを実行する
 import folium
+from folium.plugins import Geocoder  
 import os
 import webbrowser
 
-# 1. マップの作成（スマホの縦幅に合わせるため height='100%' を指定）
+# 1. マップの作成（初期ズーム17の超ドアップ設定）
 akita_map = folium.Map(
-    location=[39.65, 140.2], 
-    zoom_start=9,
+    location=[39.7169, 140.1292], 
+    zoom_start=17,                
     min_zoom=8,
+    max_zoom=18,                  
     height='100%', 
+    tiles=None,                   # 👈 レイヤーコントロールを使うため、ここではいったんNoneにします
     max_bounds=True,
     min_lat=38.8, max_lat=40.5,
     min_lon=139.3, max_lon=141.0
 )
+
+# ========================================================
+# 🗺️ 【新機能】レイヤー（地図の種類）を3種類追加
+# ========================================================
+# ① 通常の道路地図（OpenStreetMap）
+folium.TileLayer(
+    tiles='OpenStreetMap',
+    name='通常の地図（道路・建物）',
+    control=True
+).add_to(akita_map)
+
+# ② 国土地理院 航空写真（サテライト）
+folium.TileLayer(
+    tiles='https://cyberjapandata.gsi.go.jp/xyz/ort/{z}/{x}/{y}.jpg',
+    attr='国土地理院 航空写真',
+    name='航空写真（上空からの景色）',
+    control=True
+).add_to(akita_map)
+
+# ③ 国土地理院 淡色地図（シンプルで見やすい地図）
+folium.TileLayer(
+    tiles='https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
+    attr='国土地理院 淡色地図',
+    name='淡色地図（シンプル表示）',
+    control=True
+).add_to(akita_map)
+
+# 👈 右上に切り替えボタン（パネル）を表示させる魔法の1行
+folium.LayerControl(position='topright', collapsed=True).add_to(akita_map)
+# ========================================================
+
 
 # 2. 目印として秋田駅にマーカーを設置
 folium.Marker(
@@ -21,12 +55,18 @@ folium.Marker(
     icon=folium.Icon(color='blue', icon='home')
 ).add_to(akita_map)
 
+# 3. 🗺️ 検索機能（Geocoder）を追加
+Geocoder(
+    collapsed=True, 
+    position='topleft', 
+    zoom=17, 
+    placeholder='場所を検索...'
+).add_to(akita_map)
+
 
 # ========================================================
-# ⚡ 【スマホ専用】一気に真っ白＆GPSブロックを解除する魔法のコード
+# ⚡ 【スマホ専用】開いた瞬間に現在地へ超ドアップで自動ワープする魔法のコード
 # ========================================================
-# この長い文字（HTML/CSS/JavaScript）を地図の中に直接埋め込むことで、
-# OneDrive等のアプリ内から開いても画面が潰れず、安全に現在地を表示できるようになります。
 custom_smartphone_script = """
 <style>
     html, body { width: 100%; height: 100vh; margin: 0; padding: 0; }
@@ -35,26 +75,32 @@ custom_smartphone_script = """
         background: white; border: 2px solid #ccc; padding: 8px 12px;
         border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 14px;
     }
+    /* 📱 レイヤー切り替えボタンがスマホで見やすくなるように少しデザインを調整 */
+    .leaflet-control-layers {
+        margin-top: 60px !important; /* 現在地ボタンと被らないように下にずらす */
+        border: 2px solid #ccc !important;
+        border-radius: 5px !important;
+    }
 </style>
 <button id="current-location-btn" onclick="getLocation()">📱 現在地を取得</button>
 <script>
     var userMarker = null;
+
     function getLocation() {
         if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition(function(position) {
                 var lat = position.coords.latitude;
                 var lng = position.coords.longitude;
                 
-                // 地図の変数名を自動取得して動かす（Foliumのマップオブジェクトに対応）
                 var maps = Object.keys(window).filter(k => k.startsWith('map_'));
                 if (maps.length > 0) {
                     var mapObj = window[maps[0]];
-                    mapObj.flyTo([lat, lng], 14);
+                    mapObj.flyTo([lat, lng], 17);
                     
                     if (userMarker) { mapObj.removeLayer(userMarker); }
                     userMarker = L.circleMarker([lat, lng], {
                         color: '#137cbd', fillColor: '#137cbd', fillOpacity: 0.8, radius: 8
-                    }).addTo(mapObj).bindPopup("あなたの現在地（秋田県内）").openPopup();
+                    }).addTo(mapObj).bindPopup("あなたの現在地（周辺）").openPopup();
                 }
             }, function(error) {
                 alert("GPSの取得に失敗しました。ブラウザの位置情報許可を確認してください。");
@@ -63,9 +109,12 @@ custom_smartphone_script = """
             alert("お使いのブラウザはGPSに対応していません。");
         }
     }
+
+    window.onload = function() {
+        setTimeout(getLocation, 500); 
+    };
 </script>
 """
-# 地図のヘッダーとボディに一気に注入
 akita_map.get_root().header.add_child(folium.Element(custom_smartphone_script))
 # ========================================================
 
@@ -80,4 +129,4 @@ akita_map.save(file_path)
 # 6. パソコンのブラウザで開く
 webbrowser.open("file://" + file_path)
 
-print(f"✨ スマホでも絶対に開けるマップを保存しました: {file_path}")
+print(f"✨ 右上に地図切り替えボタンが付いた、超ドアップ現在地マップを保存しました: {file_path}")
