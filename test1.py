@@ -1,4 +1,3 @@
-
 import requests
 import folium
 from folium.features import DivIcon
@@ -8,7 +7,7 @@ import os
 import json
 import time
 from datetime import datetime, timedelta
-
+#!pip install foliumをコンソールに
 # 秋田県全13市の緯度・経度データ
 AKITA_CITIES = {
     "秋田市": {"lat": 39.7186, "lon": 140.1023},
@@ -27,7 +26,8 @@ AKITA_CITIES = {
 }
 
 def get_weather_icon(code):
-    if code == 0: return "☀️"
+    if code == -1: return "⚠️"
+    elif code == 0: return "☀️"
     elif 1 <= code <= 3: return "☁️"
     elif 45 <= code <= 48: return "🌫️"
     elif 51 <= code <= 55: return "🌧️"
@@ -38,111 +38,143 @@ def get_weather_icon(code):
     else: return "❓"
 
 def create_future_weather_map():
-    print("最新の時間を計算し、15時間先までのデータを準備しています...")
+    print("気象データを取得しています...")
     
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://www.jma.go.jp/bosai/nowc/",
+        "Cache-Control": "no-cache"
+    }
+    
+    session = requests.Session()
+    session.headers.update(headers)
+
     # 1. 気象庁の防災情報
-    jma_text = "情報の取得に失敗しました。"
+    jma_text = "防災情報の取得に失敗しました。"
     try:
         jma_url = "https://www.jma.go.jp/bosai/forecast/data/overview_forecast/050000.json"
-        jma_response = requests.get(jma_url)
-        jma_text = jma_response.json().get("text", "").replace('\n', '<br>')
-    except: pass
+        jma_response = session.get(jma_url, timeout=5)
+        if jma_response.status_code == 200:
+            jma_text = jma_response.json().get("text", "").replace('\n', '<br>')
+    except Exception as e: 
+        print(f"防災情報の取得エラー: {e}")
 
     # 2. Open-Meteo 天気データ
     lats = ",".join([str(city["lat"]) for city in AKITA_CITIES.values()])
     lons = ",".join([str(city["lon"]) for city in AKITA_CITIES.values()])
     om_url = f"https://api.open-meteo.com/v1/forecast?latitude={lats}&longitude={lons}&current_weather=true&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=Asia/Tokyo"
+    
+    weather_data = None
     try:
-        data = requests.get(om_url).json()
+        om_resp = session.get(om_url, timeout=10)
+        if om_resp.status_code == 200:
+            weather_data = om_resp.json()
     except Exception as e:
-        print(f"天気データの取得エラー: {e}")
-        return
+        print(f"天気データの通信エラー: {e}")
 
-    # 3. 雨雲レーダーの時間データ取得
+    if weather_data is None or type(weather_data) is not list:
+        weather_data = [{"current_weather": {"weathercode": -1, "temperature": "--"}, 
+                         "daily": {"time": ["----/--/--"]*7, "weathercode": [-1]*7, 
+                                   "temperature_2m_max": ["--"]*7, "temperature_2m_min": ["--"]*7}} 
+                        for _ in AKITA_CITIES]
+
+    # 3. 雨雲レーダーの時間データ取得（気象庁メイン ＋ RainViewer予備）
+    print("気象庁サーバーからレーダーデータを探索しています...")
     js_urls = []
     js_labels = []
-    try:
-        # 気象庁のサーバーキャッシュを回避するためタイムスタンプを付与
-        cb = int(time.time() * 1000)
-        urls_to_fetch = [
-            f"https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_={cb}",
-            f"https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_={cb}",
-            f"https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N3.json?_={cb}",
-            f"https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N4.json?_={cb}"
-        ]
-        
-        all_times = {}
-        for url in urls_to_fetch:
+    
+    all_times = {}
+    prods_to_try = ["nowc", "prca", "rasrf"]
+    fnames_to_try = ["targetTimes_N1.json", "targetTimes_N2.json", "targetTimes_N3.json", "targetTimes.json"]
+    
+    # 【対策1】キャッシュバスティング用のタイムスタンプ
+    current_ts = int(time.time() * 1000)
+
+    for prod in prods_to_try:
+        for fname in fnames_to_try:
+            # ?_={current_ts} をつけて強制的に最新データを取得
+            url = f"https://www.jma.go.jp/bosai/jmatile/data/{prod}/{fname}?_={current_ts}"
             try:
-                resp = requests.get(url)
+                # 【対策2】タイムアウトを少し延ばす
+                resp = session.get(url, timeout=5)
                 if resp.status_code == 200:
                     for t in resp.json():
-                        key = t["validtime"]
-                        if key not in all_times or t["basetime"] > all_times[key]["basetime"]:
-                            all_times[key] = t
-            except:
-                pass
-                
-        # ★最重要: 観測データ(basetime == validtime)の中で最新のものを「本当の現在」とする
-        current_time_str = None
-        for t in all_times.values():
-            if t["basetime"] == t["validtime"]:
-                if current_time_str is None or t["validtime"] > current_time_str:
-                    current_time_str = t["validtime"]
+                        if "basetime" in t and "validtime" in t:
+                            key = t["validtime"]
+                            t["prod"] = prod
+                            if key not in all_times or t["basetime"] > all_times[key]["basetime"]:
+                                all_times[key] = t
+            except Exception:
+                pass 
 
-        # 時間順に並び替え
-        forecast_list = list(all_times.values())
-        
-        # 過去データを確実に切り捨て、「現在時刻」以降のデータだけを残す
-        if current_time_str:
-            forecast_list = [t for t in forecast_list if t["validtime"] >= current_time_str]
+    # 過去データを足切りして未来データにする処理
+    current_time_str = None
+    for t in all_times.values():
+        if t["basetime"] == t["validtime"]:
+            if current_time_str is None or t["validtime"] > current_time_str:
+                current_time_str = t["validtime"]
+
+    forecast_list = list(all_times.values())
+    forecast_list.sort(key=lambda x: x["validtime"])
+
+    if current_time_str:
+        forecast_list = [t for t in forecast_list if t["validtime"] >= current_time_str]
+
+    if len(forecast_list) > 0:
+        dt_base_now_utc = datetime.strptime(current_time_str, "%Y%m%d%H%M%S")
+        for t in forecast_list:
+            prod = t["prod"]
+            elements = t.get("elements", [])
+            element = elements[0] if elements else ("hrpns" if prod == "nowc" else ("prca" if prod == "prca" else "rasrf"))
+
+            url = f"https://www.jma.go.jp/bosai/jmatile/data/{prod}/{t['basetime']}/none/{t['validtime']}/surf/{element}/{{z}}/{{x}}/{{y}}.png"
+            js_urls.append(url)
+
+            dt_vt_utc = datetime.strptime(t['validtime'], "%Y%m%d%H%M%S")
+            dt_vt_jst = dt_vt_utc + timedelta(hours=9)
+            time_str = dt_vt_jst.strftime('%H:%M')
             
-        forecast_list.sort(key=lambda x: x["validtime"])
-
-        if len(forecast_list) > 0:
-            # 基準となる「現在」のUTC時間
-            dt_base_now_utc = datetime.strptime(forecast_list[0]["validtime"], "%Y%m%d%H%M%S")
-
-            for t in forecast_list:
-                elements = t.get("elements", [])
-                if "prca" in elements:
-                    element = "prca"
-                elif "hrpns" in elements:
-                    element = "hrpns"
-                else:
-                    element = "hrpns"
-
-                url = f"https://www.jma.go.jp/bosai/jmatile/data/nowc/{t['basetime']}/none/{t['validtime']}/surf/{element}/{{z}}/{{x}}/{{y}}.png"
-                js_urls.append(url)
-
-                # 対象時間のUTC時間
-                dt_vt_utc = datetime.strptime(t['validtime'], "%Y%m%d%H%M%S")
-                
-                # UTCから日本時間（+9時間）へ変換
-                dt_vt_jst = dt_vt_utc + timedelta(hours=9)
-                time_str = dt_vt_jst.strftime('%H:%M')
-
-                # 現在からの経過分（計算はUTC同士）
-                diff_mins = int((dt_vt_utc - dt_base_now_utc).total_seconds() / 60)
-
-                if diff_mins == 0:
-                    lbl = f"現在 ({time_str})"
-                elif diff_mins >= 60:
-                    hours = diff_mins // 60
-                    mins = diff_mins % 60
-                    lbl = f"{hours}時間後 ({time_str})" if mins == 0 else f"{hours}時間{mins}分後 ({time_str})"
-                else:
-                    lbl = f"{diff_mins}分後 ({time_str})"
-                
-                js_labels.append(lbl)
+            diff_mins = int((dt_vt_utc - dt_base_now_utc).total_seconds() / 60)
+            if diff_mins == 0: lbl = f"現在 ({time_str})"
+            elif diff_mins >= 60: lbl = f"{diff_mins // 60}時間後 ({time_str})" if diff_mins % 60 == 0 else f"{diff_mins // 60}時間{diff_mins % 60}分後 ({time_str})"
+            else: lbl = f"{diff_mins}分後 ({time_str})"
             
-    except Exception as e:
-        print(f"時間データの取得エラー: {e}")
+            js_labels.append(lbl)
 
-    # 万が一データが空になった時の保険
+    # 【対策3】気象庁データが全滅した場合、RainViewerAPI（安定稼働の予備）へフォールバック
     if len(js_urls) == 0:
-        js_urls = [""] * 10
-        js_labels = [f"エラー({i})" for i in range(10)]
+        print("⚠️ 気象庁データの取得に失敗しました。予備のグローバルレーダー（RainViewer）を取得します...")
+        try:
+            rv_resp = session.get("https://api.rainviewer.com/public/weather-maps.json", timeout=5)
+            if rv_resp.status_code == 200:
+                rv_data = rv_resp.json()
+                rv_host = rv_data.get("host", "https://tilecache.rainviewer.com")
+                
+                # 過去と未来(nowcast)のデータを結合
+                all_rv_times = rv_data.get("radar", {}).get("past", []) + rv_data.get("radar", {}).get("nowcast", [])
+                
+                for t_data in all_rv_times:
+                    ts = t_data["time"]
+                    # UNIXタイムスタンプをJSTに変換
+                    dt_jst = datetime.utcfromtimestamp(ts) + timedelta(hours=9)
+                    
+                    lbl = dt_jst.strftime('%m/%d %H:%M')
+                    tile_url = f"{rv_host}/v2/radar/{ts}/256/{{z}}/{{x}}/{{y}}/2/1_1.png"
+                    
+                    js_labels.append(lbl)
+                    js_urls.append(tile_url)
+        except Exception as e:
+            print(f"予備レーダーも取得エラー: {e}")
+
+    # それでもダメな場合の最終防波堤
+    if len(js_urls) == 0:
+        js_urls = [""] * 2
+        js_labels = ["エラー(現在)", "エラー(未来)"]
+        success_msg = "⚠️ レーダーデータを取得できませんでした"
+        msg_color = "#f44336"
+    else:
+        success_msg = f"✅ 最大 {js_labels[-1]} まで取得成功"
+        msg_color = "#4CAF50"
 
     urls_json = json.dumps(js_urls)
     labels_json = json.dumps(js_labels)
@@ -165,8 +197,8 @@ def create_future_weather_map():
                 <span>{js_labels[0].split(' ')[0]}</span>
                 <span>{js_labels[-1].split(' ')[0]}</span>
             </div>
-            <div style="font-size: 11px; color: #666; margin-top: 8px; text-align: center; line-height: 1.3;">
-                ※レーダー観測の仕様上、5〜10分前の時刻が「現在(最新)」となります。
+            <div style="font-size: 13px; color: {msg_color}; font-weight: bold; margin-top: 10px; text-align: center; background: #f9f9f9; padding: 5px; border-radius: 5px;">
+                {success_msg}
             </div>
         </div>
     </div>
@@ -244,12 +276,12 @@ def create_future_weather_map():
         <table style="width: 100%; font-size: 14px; border-collapse: collapse;">
     """
     for i, city_name in enumerate(AKITA_CITIES.keys()):
-        current = data[i]["current_weather"]
+        current = weather_data[i]["current_weather"]
         summary_html += f"""
         <tr style="border-bottom: 1px solid #ddd; height: 35px;">
             <td style="font-weight: bold;">{city_name}</td>
-            <td style="font-size: 20px;">{get_weather_icon(current["weathercode"])}</td>
-            <td style="color: #d32f2f; font-weight: bold;">{current["temperature"]}℃</td>
+            <td style="font-size: 20px;">{get_weather_icon(current.get("weathercode", -1))}</td>
+            <td style="color: #d32f2f; font-weight: bold;">{current.get("temperature", "--")}℃</td>
         </tr>"""
     summary_html += "</table></div>"
     akita_map.get_root().html.add_child(folium.Element(summary_html))
@@ -263,31 +295,35 @@ def create_future_weather_map():
     akita_map.get_root().html.add_child(folium.Element(warning_html))
 
     for i, (city_name, coords) in enumerate(AKITA_CITIES.items()):
-        current = data[i]["current_weather"]
-        daily = data[i]["daily"]
+        current = weather_data[i]["current_weather"]
+        daily = weather_data[i]["daily"]
         
         popup_html = f"<h3 style='margin:0 0 10px 0;'>📅 {city_name}の1週間</h3>"
         popup_html += "<table style='width: 350px; text-align: center; font-size: 16px; border-collapse: collapse;'>"
         popup_html += "<tr style='background-color: #eee;'><th>日</th><th>空</th><th>最高</th><th>最低</th></tr>"
-        for d in range(7):
-            popup_html += f"<tr style='border-bottom: 1px solid #ccc; height: 35px;'><td>{daily['time'][d][5:]}</td><td style='font-size:20px;'>{get_weather_icon(daily['weathercode'][d])}</td><td style='color:red;'>{daily['temperature_2m_max'][d]}℃</td><td style='color:blue;'>{daily['temperature_2m_min'][d]}℃</td></tr>"
+        
+        loop_count = min(7, len(daily.get('time', [])))
+        for d in range(loop_count):
+            date_str = daily['time'][d][5:] if len(daily['time'][d]) > 5 else "--/--"
+            w_code = daily['weathercode'][d]
+            t_max = daily['temperature_2m_max'][d]
+            t_min = daily['temperature_2m_min'][d]
+            popup_html += f"<tr style='border-bottom: 1px solid #ccc; height: 35px;'><td>{date_str}</td><td style='font-size:20px;'>{get_weather_icon(w_code)}</td><td style='color:red;'>{t_max}℃</td><td style='color:blue;'>{t_min}℃</td></tr>"
         popup_html += "</table>"
 
         marker_html = f"""
         <div style="background-color: white; border: 3px solid #333; border-radius: 10px; padding: 5px; text-align: center; width: 100px; cursor: pointer; box-shadow: 3px 3px 6px rgba(0,0,0,0.3);">
             <div style="font-size: 14px; font-weight: bold;">{city_name}</div>
-            <div style="font-size: 24px;">{get_weather_icon(current['weathercode'])}</div>
-            <div style="font-size: 16px; color: #d32f2f; font-weight: bold;">{current['temperature']}℃</div>
+            <div style="font-size: 24px;">{get_weather_icon(current.get('weathercode', -1))}</div>
+            <div style="font-size: 16px; color: #d32f2f; font-weight: bold;">{current.get('temperature', '--')}℃</div>
         </div>"""
         
         folium.Marker(location=[coords["lat"], coords["lon"]], icon=DivIcon(html=marker_html, icon_anchor=(50, 50)), popup=Popup(popup_html, max_width=400)).add_to(akita_map)
 
-    map_filename = "akita_final_perfect_cache_fixed.html"
+    map_filename = "akita_weather_perfect.html"
     akita_map.save(map_filename)
     webbrowser.open('file://' + os.path.realpath(map_filename))
-    print(f"キャッシュ対策と時間計算を最適化したマップを開きました！")
+    print("マップを開きました！（キャッシュ対策・予備API対応済み）")
 
 if __name__ == "__main__":
     create_future_weather_map()
-
-  
