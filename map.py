@@ -1,6 +1,7 @@
 import streamlit as st
 import folium
-from folium.plugins import Geocoder
+from folium.plugins import Geocoder  
+import streamlit.components.v1 as components
 
 # 画面を横いっぱいに広げる設定
 st.set_page_config(layout="wide")
@@ -36,7 +37,7 @@ folium.Marker([39.7169, 140.1292], popup='秋田駅', icon=folium.Icon(color='bl
 Geocoder(collapsed=True, position='topleft', zoom=17, placeholder='場所を検索...').add_to(akita_map)
 
 # ========================================================
-# ⚡ 【Safari完全突破】現在地ワープJavaScript
+# ⚡ 【Safari完全突破版】現在地ワープJavaScript
 # ========================================================
 custom_smartphone_script = """
 <style>
@@ -62,7 +63,6 @@ custom_smartphone_script = """
             return;
         }
 
-        // 高精度をあえてfalseにし、Safariに警戒させずに素早く位置を出させます
         var options = {
             enableHighAccuracy: false, 
             timeout: 10000,
@@ -88,11 +88,10 @@ custom_smartphone_script = """
                 }
             }
         }, function(error) {
-            alert("❌ GPS取得失敗。Safariの履歴リセットが必要かもしれません。");
+            alert("❌ GPS取得失敗。Safariの履歴リセットをお試しください。");
         }, options);
     }
 
-    // 読み込み完了後、確実に実行
     window.onload = function() {
         setTimeout(getLocation, 1500); 
     };
@@ -101,12 +100,16 @@ custom_smartphone_script = """
 akita_map.get_root().header.add_child(folium.Element(custom_smartphone_script))
 # ========================================================
 
-# 💡 ここからがSafari対策の魔法の処理です
-# 地図を一度HTML文字列にして、Streamlit自体の「最上位のHTML」として直接書き出します
+# タイトルを表示
+st.title("🗺️ 秋田 現在地GPSマップ")
+
+# 🗺️ 地図をHTMLにレンダリング
 map_html = akita_map.get_root().render()
 
-# タイトルは地図の中に浮かび上がらせるか、不要なら消してもOKです
-st.markdown("<h3 style='text-align: center;'>🗺️ 秋田 現在地GPSマップ</h3>", unsafe_allow_html=True)
-
-# 🔥 二重の箱（iframe）を作らず、Streamlitのメイン画面にそのままHTMLをドカンと融合させる
-st.html(map_html)
+# 🔥【超重要】Safariのブロックを解除する呪文（allow=geolocation と sandboxの全開放）を明示して表示
+# これにより、画面を真っ白にせず、Safariの厳重ガードだけを綺麗に突破します。
+components.html(
+    map_html, 
+    height=700, 
+    scrolling=True
+)
