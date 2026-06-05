@@ -170,7 +170,6 @@ Geocoder(collapsed=True, position='topleft', zoom=17, placeholder='場所を検�
 # ========================================================
 external_ui_html = """
 <style>
-    /* スマホ画面（幅が768px以下）の時のレイアウト上書き設定 */
     @media (max-width: 768px) {
         #independent-ui { left: 5px !important; top: 60px !important; width: 45vw !important; padding: 10px !important; }
         #independent-ui button { font-size: 13px !important; padding: 8px !important; margin-top: 5px !important;}
@@ -245,7 +244,6 @@ document.addEventListener("DOMContentLoaded", function() {
         var sliderBox = document.getElementById('slider-box');
         var timeLabel = document.getElementById('time-label');
         
-        // パネル上での操作が地図に干渉しないようにする
         var uis = ['independent-ui', 'weather-panel', 'warning-panel'];
         uis.forEach(function(id) {
             var el = document.getElementById(id);
