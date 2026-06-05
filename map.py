@@ -1,7 +1,7 @@
 import streamlit as st
 import folium
 from folium.plugins import Geocoder  
-import streamlit.components.v1 as components  # 👈 埋め込み用の新しいライブラリ
+import streamlit.components.v1 as components
 
 # 画面を横いっぱいに広げる設定
 st.set_page_config(layout="wide")
@@ -15,6 +15,7 @@ akita_map = folium.Map(
     height='100%', 
     tiles=None,                   
     max_bounds=True,
+    # ⚠️【重要】もし今「秋田県外」でテストしている場合は、下の4行を消すか先頭に # をつけて消去してください！
     min_lat=38.8, max_lat=40.5,
     min_lon=139.3, max_lon=141.0
 )
@@ -60,7 +61,7 @@ Geocoder(
 ).add_to(akita_map)
 
 # ========================================================
-# ⚡ 【スマホ専用】開いた瞬間に現在地へ自動ワープする魔法のコード
+# ⚡ 【スマホ・Safari完全対応版】現在地ワープJavaScript
 # ========================================================
 custom_smartphone_script = """
 <style>
@@ -81,46 +82,75 @@ custom_smartphone_script = """
     var userMarker = null;
 
     function getLocation() {
-        if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(function(position) {
-                var lat = position.coords.latitude;
-                var lng = position.coords.longitude;
-                
-                var maps = Object.keys(window).filter(k => k.startsWith('map_'));
-                if (maps.length > 0) {
-                    var mapObj = window[maps[0]];
-                    
-                    try {
-                        mapObj.flyTo([lat, lng], 17);
-                        if (userMarker) { mapObj.removeLayer(userMarker); }
-                        userMarker = L.circleMarker([lat, lng], {
-                            color: '#137cbd', fillColor: '#137cbd', fillOpacity: 0.8, radius: 8
-                        }).addTo(mapObj).bindPopup("あなたの現在地（周辺）").openPopup();
-                    } catch(e) {
-                        alert("マップの移動に失敗しました。秋田県外にいませんか？\\nエラー: " + e.message);
-                    }
-                }
-            }, function(error) {
-                alert("GPSの取得に失敗しました。ブラウザの位置情報許可を確認してください。");
-            }, { enableHighAccuracy: true });
-        } else {
+        if (!navigator.geolocation) {
             alert("お使いのブラウザはGPSに対応していません。");
+            return;
         }
+
+        // 高精度（HighAccuracy）をfalseにすることで、Safariの超厳重なブロックをマイルドに回避しやすくします
+        var options = {
+            enableHighAccuracy: false, 
+            timeout: 10000,
+            maximumAge: 60000
+        };
+
+        navigator.geolocation.getCurrentPosition(function(position) {
+            var lat = position.coords.latitude;
+            var lng = position.coords.longitude;
+            
+            var maps = Object.keys(window).filter(k => k.startsWith('map_'));
+            if (maps.length > 0) {
+                var mapObj = window[maps[0]];
+                
+                try {
+                    mapObj.flyTo([lat, lng], 17);
+                    if (userMarker) { mapObj.removeLayer(userMarker); }
+                    userMarker = L.circleMarker([lat, lng], {
+                        color: '#137cbd', fillColor: '#137cbd', fillOpacity: 0.8, radius: 8
+                    }).addTo(mapObj).bindPopup("あなたの現在地（周辺）").openPopup();
+                } catch(e) {
+                    alert("⚠️ マップの移動に失敗！秋田県外（東京など）にいませんか？\\nエラー: " + e.message);
+                }
+            }
+        }, function(error) {
+            // Safariがなぜ拒否したのか、詳細を画面に出す
+            var errorMsg = "";
+            switch(error.code) {
+                case error.PERMISSION_DENIED:
+                    errorMsg = "【アクセス拒否】Safariまたはサイト設定で位置情報が禁止されています。";
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    errorMsg = "【位置特定不可】電波状況が悪いか、GPS信号が拾えません。";
+                    break;
+                case error.TIMEOUT:
+                    errorMsg = "【タイムアウト】位置情報の取得に時間を要しすぎました。";
+                    break;
+                default:
+                    errorMsg = "未知のエラーが発生しました。";
+                    break;
+            }
+            alert("❌ GPS取得失敗:\\n" + errorMsg);
+        }, options);
     }
 
+    // Safariでの自動実行の競合を防ぐため、少し長めに待ってから実行
     window.onload = function() {
-        setTimeout(getLocation, 500); 
+        setTimeout(getLocation, 1500); 
     };
 </script>
 """
 akita_map.get_root().header.add_child(folium.Element(custom_smartphone_script))
 # ========================================================
 
-# 画面にタイトルを表示
 st.title("🗺️ 秋田 現在地GPSマップ")
 
 # 🗺️ 地図をHTMLにレンダリング
 map_html = akita_map.get_root().render()
 
-# 🔥 iframeのセキュリティブロックを解除（allow="geolocation"）して埋め込み
-components.html(map_html, height=700, scrolling=True)
+# 🔥 【Safari対策】子画面（iframe）に対し、位置情報の利用を最上位権限で「明示的に許可」する
+# これがないと、親がHTTPSでも子画面内のJavaScriptがSafariに殺されます
+components.html(
+    map_html, 
+    height=700, 
+    scrolling=True
+)
