@@ -1,5 +1,3 @@
-import streamlit as st
-from streamlit_folium import st_folium
 import requests
 import folium
 from folium.plugins import Geocoder
@@ -8,9 +6,10 @@ from folium import Popup
 import json
 import time
 from datetime import datetime, timedelta
+import webbrowser
+import os
 
-# 画面設定（横幅を広く使い、タイトルを設定）
-st.set_page_config(layout="wide", page_title="秋田お天気GPSマップ")
+print("気象データを取得しています...")
 
 # 秋田県全13市の緯度・経度データ
 AKITA_CITIES = {
@@ -41,13 +40,11 @@ def get_weather_icon(code):
     elif 95 <= code <= 99: return "⛈️"
     else: return "❓"
 
-st.title("🗺️ 秋田 現在地GPS ＆ お天気レーダーマップ")
-
 # ========================================================
-# 📡 データのバックエンド取得処理（サーバー不要・API直結）
+# 📡 データのバックエンド取得処理
 # ========================================================
 headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
     "Referer": "https://www.jma.go.jp/bosai/nowc/",
     "Cache-Control": "no-cache"
 }
@@ -74,8 +71,8 @@ try:
     om_resp = session.get(om_url, timeout=10)
     if om_resp.status_code == 200:
         weather_data = om_resp.json()
-except Exception:
-    pass
+except Exception as e:
+    print(f"天気データの取得エラー: {e}")
 
 if weather_data is None or type(weather_data) is not list:
     weather_data = [{"current_weather": {"weathercode": -1, "temperature": "--"}, 
@@ -141,15 +138,15 @@ if len(js_urls) == 0:
     success_msg = "⚠️ レーダーデータが見つかりませんでした"
     msg_color = "#f44336"
 else:
-    success_msg = f"✅ 最大 {js_labels[-1]} まで取得成功"
-    msg_color = "#4CAF50"
+    # ⚠️ ここが最初の修正箇所です！「時間」という文字が含まれていればOKにしました
+    success_msg = f"✅ 最大 {js_labels[-1]} まで取得成功" if "時間" in js_labels[-1] else "⚠️ 1時間以降のデータが見つかりませんでした"
+    msg_color = "#4CAF50" if "時間" in js_labels[-1] else "#f44336"
 
 urls_json = json.dumps(js_urls)
 labels_json = json.dumps(js_labels)
 
-
 # ========================================================
-# 🗺️ ベースマップの作成（地図切り替えコントロール付き）
+# 🗺️ ベースマップの作成
 # ========================================================
 akita_map = folium.Map(
     location=[39.6, 140.1], 
@@ -163,46 +160,29 @@ akita_map = folium.Map(
     min_lon=138.5, max_lon=142.0
 )
 
-# ① 通常の道路地図（OpenStreetMap）
-folium.TileLayer(
-    tiles='OpenStreetMap',
-    name='通常の地図（道路・建物）',
-    control=True
-).add_to(akita_map)
-
-# ② 国土地理院 航空写真（サテライト）
-folium.TileLayer(
-    tiles='https://cyberjapandata.gsi.go.jp/xyz/ort/{z}/{x}/{y}.jpg',
-    attr='国土地理院 航空写真',
-    name='航空写真（上空からの景色）',
-    control=True
-).add_to(akita_map)
-
-# ③ 国土地理院 淡色地図（シンプル表示）
-folium.TileLayer(
-    tiles='https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
-    attr='国土地理院 淡色地図',
-    name='淡色地図（シンプル表示）',
-    control=True
-).add_to(akita_map)
-
-# レイヤー切り替えボタンを設置
+folium.TileLayer(tiles='OpenStreetMap', name='通常の地図', control=True).add_to(akita_map)
+folium.TileLayer(tiles='https://cyberjapandata.gsi.go.jp/xyz/ort/{z}/{x}/{y}.jpg', attr='国土地理院', name='航空写真', control=True).add_to(akita_map)
+folium.TileLayer(tiles='https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', attr='国土地理院', name='淡色地図', control=True).add_to(akita_map)
 folium.LayerControl(position='topright', collapsed=True).add_to(akita_map)
-
-# 🗺️ 検索機能（Geocoder）を追加
-Geocoder(
-    collapsed=True, 
-    position='topleft', 
-    zoom=17, 
-    placeholder='場所を検索...'
-).add_to(akita_map)
-
+Geocoder(collapsed=True, position='topleft', zoom=17, placeholder='場所を検索...').add_to(akita_map)
 
 # ========================================================
-# 🎨 画面上のパーツ（UI）と 高精度GPS自動ワープの合体スクリプト
+# 🎨 画面上のパーツ（UI）とスマホ対応CSS ＋ GPSスクリプト
 # ========================================================
-# ⚠️ エラーの原因だった `{}` カッコ問題を解決するため、Pythonのf-stringを一切使わずにHTMLを生成します
 external_ui_html = """
+<style>
+    /* スマホ画面（幅が768px以下）の時のレイアウト上書き設定 */
+    @media (max-width: 768px) {
+        #independent-ui { left: 5px !important; top: 60px !important; width: 45vw !important; padding: 10px !important; }
+        #independent-ui button { font-size: 13px !important; padding: 8px !important; margin-top: 5px !important;}
+        #independent-ui span { font-size: 12px !important; }
+        #weather-panel { right: 5px !important; top: 60px !important; width: 45vw !important; padding: 5px !important; max-height: 40vh !important; }
+        #weather-panel table td { font-size: 11px !important; }
+        #warning-panel { left: 5px !important; bottom: 15px !important; width: calc(100% - 16px) !important; padding: 10px !important; max-height: 120px !important; }
+        #warning-panel div { font-size: 13px !important; }
+    }
+</style>
+
 <div id="independent-ui" style="position: fixed; top: 15px; left: 50px; z-index: 999999; background: rgba(255,255,255,0.95); padding: 15px; border-radius: 12px; border: 3px solid #0D47A1; box-shadow: 0 4px 10px rgba(0,0,0,0.4); width: 280px; font-family: sans-serif;">
     <button id="radar-btn" style="width: 100%; background: #2196F3; color: white; border: none; padding: 12px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
         🌧️ 雨雲レーダーをつける
@@ -219,8 +199,7 @@ external_ui_html = """
             <span id="label-start"></span>
             <span id="label-end"></span>
         </div>
-        <div id="success-msg-box" style="font-size: 13px; font-weight: bold; margin-top: 10px; text-align: center; background: #f9f9f9; padding: 5px; border-radius: 5px;">
-        </div>
+        <div id="success-msg-box" style="font-size: 13px; font-weight: bold; margin-top: 10px; text-align: center; background: #f9f9f9; padding: 5px; border-radius: 5px;"></div>
     </div>
 </div>
 """
@@ -236,11 +215,9 @@ document.addEventListener("DOMContentLoaded", function() {
     var mapObj = null;
     var userMarker = null;
     
-    // スライダーの最大値を設定
     var slider = document.getElementById('time-slider');
     if(slider) { slider.max = urls.length - 1; }
     
-    // ラベルなどのテキストを代入
     document.getElementById('time-label').innerText = labels[0];
     document.getElementById('label-start').innerText = labels[0].split(' ')[0];
     document.getElementById('label-end').innerText = labels[labels.length - 1].split(' ')[0];
@@ -269,9 +246,15 @@ document.addEventListener("DOMContentLoaded", function() {
         var sliderBox = document.getElementById('slider-box');
         var timeLabel = document.getElementById('time-label');
         
-        var ui = document.getElementById('independent-ui');
-        ['mousedown', 'touchstart', 'dblclick', 'wheel', 'pointerdown'].forEach(function(evt) {
-            ui.addEventListener(evt, function(e) { e.stopPropagation(); });
+        // パネル上での操作が地図に干渉しないようにする
+        var uis = ['independent-ui', 'weather-panel', 'warning-panel'];
+        uis.forEach(function(id) {
+            var el = document.getElementById(id);
+            if(el){
+                ['mousedown', 'touchstart', 'dblclick', 'wheel', 'pointerdown'].forEach(function(evt) {
+                    el.addEventListener(evt, function(e) { e.stopPropagation(); });
+                });
+            }
         });
 
         btn.addEventListener('click', function() {
@@ -303,11 +286,7 @@ document.addEventListener("DOMContentLoaded", function() {
 
         function findMe() {
             if (navigator.geolocation) {
-                var gpsOptions = {
-                    enableHighAccuracy: true,
-                    timeout: 10000,
-                    maximumAge: 0
-                };
+                var gpsOptions = { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 };
                 navigator.geolocation.getCurrentPosition(function(position) {
                     var lat = position.coords.latitude;
                     var lng = position.coords.longitude;
@@ -317,7 +296,7 @@ document.addEventListener("DOMContentLoaded", function() {
                         color: '#137cbd', fillColor: '#137cbd', fillOpacity: 0.8, radius: 8
                     }).addTo(mapObj).bindPopup("あなたの現在地").openPopup();
                 }, function(error) {
-                    console.log("GPS自動起動失敗。位置情報サービスをONにしてください。");
+                    console.log("GPS自動起動失敗。");
                 }, gpsOptions);
             }
         }
@@ -329,7 +308,6 @@ document.addEventListener("DOMContentLoaded", function() {
 </script>
 """
 
-# 安全に変数をスクリプト内に埋め込む
 final_script = external_ui_script.replace("_URLS_JSON_", urls_json).replace("_LABELS_JSON_", labels_json).replace("_SUCCESS_MSG_", success_msg).replace("_MSG_COLOR_", msg_color)
 
 akita_map.get_root().html.add_child(folium.Element(external_ui_html))
@@ -337,7 +315,7 @@ akita_map.get_root().html.add_child(folium.Element(final_script))
 
 # 右上：いまの天気一覧パネル
 summary_html = """
-<div style="position: fixed; top: 15px; right: 15px; z-index: 999999; background-color: white; border: 3px solid #333; padding: 10px; border-radius: 10px; box-shadow: 4px 4px 10px rgba(0,0,0,0.4); width: 220px; max-height: 45vh; overflow-y: auto; font-family: sans-serif;">
+<div id="weather-panel" style="position: fixed; top: 15px; right: 15px; z-index: 999999; background-color: white; border: 3px solid #333; padding: 10px; border-radius: 10px; box-shadow: 4px 4px 10px rgba(0,0,0,0.4); width: 220px; max-height: 45vh; overflow-y: auto; font-family: sans-serif;">
     <div style="font-weight: bold; font-size: 16px; margin-bottom: 8px; text-align: center; border-bottom: 2px solid #333;">🌡️ いまの天気</div>
     <table style="width: 100%; font-size: 14px; border-collapse: collapse;">
 """
@@ -354,13 +332,12 @@ akita_map.get_root().html.add_child(folium.Element(summary_html))
 
 # 左下：防災お天気アラートパネル
 warning_html = f"""
-<div style="position: fixed; bottom: 15px; left: 15px; z-index: 999999; background-color: #FFF0F0; border: 3px solid #d32f2f; padding: 15px; border-radius: 12px; font-family: sans-serif; box-shadow: 3px 3px 6px rgba(0,0,0,0.4); width: 380px; max-height: 180px; overflow-y: auto;">
-    <div style="color: #d32f2f; font-size: 18px; font-weight: bold; margin-bottom: 8px;">⚠️ 防災・天気のお知らせ</div>
+<div id="warning-panel" style="position: fixed; bottom: 15px; left: 15px; z-index: 999999; background-color: #FFF0F0; border: 3px solid #d32f2f; padding: 15px; border-radius: 12px; font-family: sans-serif; box-shadow: 3px 3px 6px rgba(0,0,0,0.4); width: 380px; max-height: 180px; overflow-y: auto;">
+    <div style="color: #d32f2f; font-size: 18px; font-weight: bold; margin-bottom: 8px;">⚠️ 防災・お知らせ</div>
     <div style="font-size: 16px; color: #000; line-height: 1.6; font-weight: bold;">{jma_text}</div>
 </div>
 """
 akita_map.get_root().html.add_child(folium.Element(warning_html))
-
 
 # ========================================================
 # 🏙️ 各都市のお天気マーカー ＆ ポップアップ
@@ -383,7 +360,7 @@ for i, (city_name, coords) in enumerate(AKITA_CITIES.items()):
     popup_html += "</table>"
 
     marker_html = f"""
-    <div style="background-color: white; border: 3px solid #333; border-radius: 10px; padding: 5px; text-align: center; width: 100px; cursor: pointer; box-shadow: 3px 3px 6px rgba(0,0,0,0.3);">
+    <div class="custom-icon-marker" style="background-color: white; border: 3px solid #333; border-radius: 10px; padding: 5px; text-align: center; width: 100px; cursor: pointer; box-shadow: 3px 3px 6px rgba(0,0,0,0.3);">
         <div style="font-size: 14px; font-weight: bold;">{city_name}</div>
         <div style="font-size: 24px;">{get_weather_icon(current.get('weathercode', -1))}</div>
         <div style="font-size: 16px; color: #d32f2f; font-weight: bold;">{current.get('temperature', '--')}℃</div>
@@ -395,5 +372,14 @@ for i, (city_name, coords) in enumerate(AKITA_CITIES.items()):
         popup=Popup(popup_html, max_width=400)
     ).add_to(akita_map)
 
-# 🗺️ 地図をStreamlitに直接ドカンと表示！
-st_folium(akita_map, width="100%", height=700)
+# ========================================================
+# 🚀 最後の処理：地図をHTMLファイルに保存して、ブラウザで自動で開く
+# ========================================================
+file_path = "akita_weather_map.html"
+akita_map.save(file_path)
+
+# 保存したHTMLファイルをブラウザでポンっと開きます
+html_url = "file://" + os.path.realpath(file_path)
+webbrowser.open(html_url)
+
+print(f"✅ 成功！ブラウザで地図を開きました。（保存先: {file_path}）")
