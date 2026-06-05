@@ -5,20 +5,18 @@ import time
 import os
 import math
 import tkinter as tk
-import base64
+import threading
 from PIL import Image, ImageTk
 
-# --- メスガキ語録セクション ♡ ---
+# --- グローバル状態管理 ---
+last_weather_status = ""  # 天気の自動監視用
+
+# --- 1. メスガキ語録セクション ♡ ---
 def get_mesugaki_phrase():
     aisatsu = [
         "またアタシを呼び出したの？ホント寂しがり屋なんだから♡",
         "そんなにアタシに構ってほしいんだ？可愛いとこあるじゃん♡",
         "なーに？おじさん、アタシがいないと何もできないの？♡"
-    ]
-    tenki_tail = [
-        "おじさん、傘忘れてビショビショになっちゃえ♡",
-        "アタシが教えてあげたんだから、感謝しなさいよね？",
-        "こんなのも自分で調べられないなんて、ホント無能♡"
     ]
     kuma_msg = [
         "熊さんにおしり噛まれて泣きべそかきなよ♡",
@@ -27,44 +25,10 @@ def get_mesugaki_phrase():
     ]
     return {
         "aisatsu": random.choice(aisatsu),
-        "tenki": random.choice(tenki_tail),
         "kuma": random.choice(kuma_msg)
     }
 
-# --- 2. 情報をリストにして取ってくる関数 ---
-def get_mesugaki_info_list():
-    phrase = get_mesugaki_phrase()
-    results = []
-    results.append(("♡ 構ってちゃんのおじさんへ ♡", phrase['aisatsu']))
-    try:
-        url_w = "https://www.jma.go.jp/bosai/forecast/data/forecast/050000.json"
-        res = requests.get(url_w, timeout=10)
-        data = res.json()
-        weather = data[0]['timeSeries'][0]['areas'][0]['weathers'][0].replace('\u3000', ' ')
-        results.append(("♡ 今日の天気だよ ♡", f"☀️お外の天気は「{weather}」だって。\n{phrase['tenki']}"))
-    except:
-        results.append(("♡ 天気エラー ♡", "⚠️ネット繋がってないよ？おじさんのPC、化石すぎ♡"))
-    try:
-        url_e = "https://www.jma.go.jp/bosai/warning/data/warning/050000.json"
-        res = requests.get(url_e, timeout=10)
-        data = res.json()
-        warnings = []
-        if isinstance(data, list):
-            for area in data:
-                for w in area.get('warnings', []):
-                    if w.get('status') == '発表':
-                        warnings.append(w.get('name'))
-        if warnings:
-            msg = ", ".join(list(set(warnings)))
-            results.append(("📢 大変大変！ 📢", f"「{msg}」が出てるわ。無茶してアタシを悲しませないでよね？♡"))
-        else:
-            results.append(("✅ 警報チェック ✅", "警報はナシ！おじさんが無事でつまんないわ♡"))
-    except:
-        pass
-    results.append(("🐻 熊さん情報 🐻", phrase['kuma']))
-    return results
-
-# --- 3. Windows通知関数 ---
+# --- 2. Windows通知関数 ---
 def win_notification_safe(title, message):
     t = title.replace("'", "").replace('"', "")
     m = message.replace("'", "").replace('"', "")
@@ -79,49 +43,61 @@ def win_notification_safe(title, message):
              "$n.ShowBalloonTip(10000);"
     subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
+# --- 3. 気象庁データ取得コア ---
+def fetch_weather_and_warnings():
+    info = {"weather": "データなし", "warning": "警報なし", "raw_weather": ""}
+    try:
+        url_w = "https://www.jma.go.jp/bosai/forecast/data/forecast/050000.json"
+        res = requests.get(url_w, timeout=5)
+        data = res.json()
+        weather_str = data[0]['timeSeries'][0]['areas'][0]['weathers'][0].replace('\u3000', ' ')
+        info["weather"] = weather_str
+        info["raw_weather"] = weather_str
+    except:
+        info["weather"] = "気象情報の取得に失敗したわ。おじさんの回線よわよわ〜♡"
+    try:
+        url_e = "https://www.jma.go.jp/bosai/warning/data/warning/050000.json"
+        res = requests.get(url_e, timeout=5)
+        data = res.json()
+        warnings = []
+        if isinstance(data, list):
+            for area in data:
+                for w in area.get('warnings', []):
+                    if w.get('status') == '発表':
+                        warnings.append(w.get('name'))
+        if warnings:
+            info["warning"] = ", ".join(list(set(warnings)))
+    except:
+        pass
+    return info
+
+# --- 4. バックグラウンド天気自動監視タスク ---
+def background_weather_monitor():
+    global last_weather_status
+    while True:
+        info = fetch_weather_and_warnings()
+        current_w = info["raw_weather"]
+        if current_w and current_w != last_weather_status:
+            if last_weather_status != "":
+                if "雨" in current_w or "雪" in current_w:
+                    win_notification_safe("🌧️ 天気が急変したわよ！ 🌧️", f"今の天気：{current_w}\nおじさん早く傘買いなさいよね！ざぁ〜こ♡")
+                else:
+                    win_notification_safe("☀️ お天気のアップデート ☀️", f"今の天気：{current_w}\nなんか天気変わったみたい。一応教えといてあげる♡")
+            last_weather_status = current_w
+        time.sleep(30)
 
 # =========================================================================
-# 4. シューティングゲーム本体（くまお画像データ直接内蔵Ver）
+# 5. シューティングゲーム本体（リアルタイム覚醒変身版）
 # =========================================================================
-def start_mesugaki_shooting():
+def start_mesugaki_shooting(parent_win):
+    parent_win.withdraw()
+    
     m_img_path = "mesugaki_ok.png"
     o_img_path = "おじさん.png"
     o2_img_path = "むきかわ「.png"
-    b_img_path = "くまお.jpg"
 
-    # 自機画像がない場合の緊急取得
-    if not os.path.exists(m_img_path):
-        try:
-            url = "https://raw.githubusercontent.com/otnk-m/test/main/mesugaki_ok.png"
-            res = requests.get(url, timeout=5)
-            with open(m_img_path, "wb") as f: f.write(res.content)
-        except:
-            print(f"⚠️ 自機画像 '{m_img_path}' がありません。")
-            return
-
-    # 【大本命】おじさんがくれた本物の『くまお.jpg』のバイナリデータをここに直に埋め込んだわ！！
-    # これにより、フォルダになくても実行した瞬間に本物の「くまお.jpg」が100%自動生成されるわ！
-    if not os.path.exists(b_img_path):
-        try:
-            print("🐻 くまおデータが未検出のため、内蔵コアから本物の画像を実体化するわよ！")
-            kuma_b64 = (
-                "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIs"
-                "IxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIy"
-                "MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAKAAoADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAA"
-                "AAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAk"
-                "M2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKT"
-                "lJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QA"
-                "MBABAAMBAQEBAQEBAQEAAAAAAAQCAwEABgcICQoL/8QAMREAAgIBAwMCBQUBFQEBAAAAAAECEQAhMUFREmEDcYGR"
-                "ofBCscHR0eHBMgYUIDPC9f/aAAwDAQACEQMRAD8A8VooooV0V0V0V0V0V0V0V0V"
-            ) # ※文字数削減のためデモ用ヘッダー、実際は画像読み込みを最優先
-            # もしファイルが壊れてるか存在しないなら、ローカルの読み込みフォールバックを徹底
-            pass
-        except:
-            pass
-
-    # ウィンドウの初期化
-    game_win = tk.Tk()
-    game_win.title("🔥 メスガキ無双！ VS 回転おじさん軍団＆ボスくまお 🔥")
+    game_win = tk.Toplevel(parent_win)
+    game_win.title("🔥 メスガキ無双！ VS 回転おじさん軍団＆スーパーサイヤくまお 🔥")
     game_win.geometry("800x600")
     game_win.resizable(False, False)
     game_win.attributes("-topmost", True)
@@ -129,59 +105,64 @@ def start_mesugaki_shooting():
     canvas = tk.Canvas(game_win, width=800, height=600, bg="#111122", highlightthickness=0)
     canvas.pack()
 
-    global mesugaki_img, ojisan_images, boss_img
+    global mesugaki_img, ojisan_images, boss_normal_img, boss_awakened_img
     ojisan_images = []
-    boss_img = None
+    mesugaki_img = None
+    boss_normal_img = None
+    boss_awakened_img = None
 
-    # 画像の読み込み処理
-    try:
-        m_pil = Image.open(m_img_path).resize((80, 80), Image.Resampling.LANCZOS)
-        mesugaki_img = ImageTk.PhotoImage(m_pil, master=game_win)
-    except Exception as e:
-        print("自機画像エラー:", e)
-        game_win.destroy()
-        return
+    # 1. 自機（メスガキ）
+    if os.path.exists(m_img_path):
+        try: mesugaki_img = ImageTk.PhotoImage(Image.open(m_img_path).resize((80, 80), Image.Resampling.LANCZOS), master=game_win)
+        except Exception as e: print("自機画像エラー:", e)
 
+    # 2. 雑魚
     if os.path.exists(o_img_path):
         try: ojisan_images.append(ImageTk.PhotoImage(Image.open(o_img_path).resize((50, 90), Image.Resampling.LANCZOS), master=game_win))
-        except: pass
+        except Exception as e: print("おじさん1画像エラー:", e)
     if os.path.exists(o2_img_path):
         try: ojisan_images.append(ImageTk.PhotoImage(Image.open(o2_img_path).resize((80, 90), Image.Resampling.LANCZOS), master=game_win))
-        except: pass
+        except Exception as e: print("おじさん2画像エラー:", e)
 
-    # ここが修正の核心：もし「くまお.jpg」があればそれを使い、万が一読み込めなくても
-    # おじさんがアップロードしてくれたファイル名がローカルにあれば意地でも掴み取る！
-    for path in [b_img_path, "くまお.jpg", "くまお.png"]:
+    # 3. ボス通常時 (くまお_2.jpg 等)
+    boss_paths = ["くまお_2.jpg", "くまお.jpg", "くまお.png"]
+    for path in boss_paths:
         if os.path.exists(path):
             try:
-                boss_img = ImageTk.PhotoImage(Image.open(path).resize((180, 200), Image.Resampling.LANCZOS), master=game_win)
+                boss_normal_img = ImageTk.PhotoImage(Image.open(path).resize((180, 200), Image.Resampling.LANCZOS), master=game_win)
                 break
-            except:
-                pass
+            except: pass
 
-    # ゲーム状態管理
+    # 4. ボスフェーズ3覚醒時 (★ここでおじさんの持ってきてくれた画像をロード！)
+    if os.path.exists("くまお覚醒.jpg"):
+        try:
+            boss_awakened_img = ImageTk.PhotoImage(Image.open("くまお覚醒.jpg").resize((180, 210), Image.Resampling.LANCZOS), master=game_win)
+            print("🐻⚡️ 'くまお覚醒.jpg' の読み込みに成功したわ！")
+        except Exception as e:
+            print("覚醒画像読み込みエラー:", e)
+
+    # ゲーム内ステート
     m_x, m_y = 400, 520
-    m_hp = 100
-    m_max_hp = 100
-    
+    m_hp, m_max_hp = 100, 100
     game_state = "ZAKO"
-    kill_count = 0
-    required_kills = 10
-    
+    kill_count, required_kills = 0, 10
     boss_x, boss_y = 400, 160
-    boss_hp = 200
-    boss_max_hp = 200
-    boss_dir = 5
-    boss_angle = 0
+    boss_hp, boss_max_hp = 200, 200
+    boss_dir, boss_angle = 5, 0
     boss_char = None
+    
+    attack_tick = 0
+    spiral_angle = 0.0
+    has_transformed = False  # 変身エフェクトフラグ
 
-    enemies = []
-    m_bullets = []
-    b_bullets = []
-    effects = []
+    enemies, m_bullets, b_bullets, effects = [], [], [], []
 
-    m_char = canvas.create_image(m_x, m_y, image=mesugaki_img)
-    score_txt = canvas.create_text(120, 30, text=f"おじさん討伐数: 0 / {required_kills}", fill="#50fa7b", font=("MS Gothic", 14, "bold"))
+    if mesugaki_img:
+        m_char = canvas.create_image(m_x, m_y, image=mesugaki_img)
+    else:
+        m_char = canvas.create_oval(m_x-20, m_y-20, m_x+20, m_y+20, fill="#ff79c6")
+
+    score_txt = canvas.create_text(150, 30, text=f"おじさん討伐数: 0 / {required_kills}", fill="#50fa7b", font=("MS Gothic", 14, "bold"))
     
     canvas.create_text(60, 575, text="PLAYER HP", fill="white", font=("MS Gothic", 10, "bold"))
     canvas.create_rectangle(120, 565, 320, 585, fill="#333")
@@ -193,40 +174,26 @@ def start_mesugaki_shooting():
 
     def spawn_ojisan():
         if game_state != "ZAKO" or kill_count >= required_kills: return
-        x = random.randint(150, 650)
-        y = random.randint(120, 240)
-        
+        x, y = random.randint(150, 650), random.randint(120, 240)
         if ojisan_images:
-            img = random.choice(ojisan_images)
-            char = canvas.create_image(x, y, image=img)
+            char = canvas.create_image(x, y, image=random.choice(ojisan_images))
         else:
-            char = canvas.create_rectangle(x-20, y-35, x+20, y+35, fill="#e94560", outline="white")
-            
+            char = canvas.create_rectangle(x-25, y-45, x+25, y+45, fill="#e94560")
         enemies.append({
-            "id": char,
-            "cx": x, "cy": y,
-            "radius": random.randint(40, 70),
-            "angle": random.uniform(0, math.pi * 2),
-            "speed": random.uniform(0.04, 0.08),
-            "move_speed": random.choice([-3, 3])
+            "id": char, "cx": x, "cy": y,
+            "radius": random.randint(40, 70), "angle": random.uniform(0, math.pi * 2),
+            "speed": random.uniform(0.04, 0.08), "move_speed": random.choice([-3, 3])
         })
 
     for _ in range(3): spawn_ojisan()
-
-    nonoshiri_words = ["ざぁ〜こ♡", "おじさん撃墜〜♡", "頭スカスカ〜♡", "ハチの巣よ！♡", "くまさんのオヤツになりな！♡", "弱すぎクソザコ♡"]
+    nonoshiri_words = ["ざぁ〜こ♡", "おじさん撃墜〜♡", "頭スカスカ〜♡", "ハチの巣よ！♡"]
 
     def move_left(e):
         nonlocal m_x
-        if m_x > 50 and m_hp > 0:
-            m_x -= 30
-            canvas.coords(m_char, m_x, m_y)
-
+        if m_x > 50 and m_hp > 0: m_x -= 30; canvas.coords(m_char, m_x, m_y)
     def move_right(e):
         nonlocal m_x
-        if m_x < 750 and m_hp > 0:
-            m_x += 30
-            canvas.coords(m_char, m_x, m_y)
-
+        if m_x < 750 and m_hp > 0: m_x += 30; canvas.coords(m_char, m_x, m_y)
     def fire_bullet(e):
         if m_hp <= 0 or game_state in ["SPAWN_BOSS", "CLEAR", "GAMEOVER"]: return
         b = canvas.create_oval(m_x-5, m_y-45, m_x+5, m_y-30, fill="#ff79c6", outline="")
@@ -235,76 +202,97 @@ def start_mesugaki_shooting():
     game_win.bind("<Left>", move_left)
     game_win.bind("<Right>", move_right)
     game_win.bind("<space>", fire_bullet)
-    game_win.bind("<Escape>", lambda e: game_win.destroy())
+    
+    def on_close():
+        game_win.destroy()
+        parent_win.deiconify()
+    game_win.protocol("WM_DELETE_WINDOW", on_close)
 
-    # --- メインループ ---
     def update_game():
-        nonlocal game_state, kill_count, boss_x, boss_y, boss_dir, boss_hp, m_hp, boss_char, boss_angle
-        
-        if game_state in ["GAMEOVER", "CLEAR"]:
-            return
+        nonlocal game_state, kill_count, boss_x, boss_y, boss_dir, boss_hp, m_hp, boss_char, boss_angle, attack_tick, spiral_angle, has_transformed
+        if not game_win.winfo_exists(): return
+        if game_state in ["GAMEOVER", "CLEAR"]: return
 
         if game_state == "ZAKO":
             for env in enemies:
                 env["angle"] += env["speed"]
                 env["cx"] += env["move_speed"]
-                if env["cx"] <= 80 or env["cx"] >= 720:
-                    env["move_speed"] *= -1
-                
-                new_x = env["cx"] + math.cos(env["angle"]) * env["radius"]
-                new_y = env["cy"] + math.sin(env["angle"]) * env["radius"]
-                canvas.coords(env["id"], new_x, new_y)
-
-            if len(enemies) < 3 and kill_count + len(enemies) < required_kills:
-                spawn_ojisan()
-                
-            if kill_count >= required_kills:
-                game_state = "SPAWN_BOSS"
+                if env["cx"] <= 80 or env["cx"] >= 720: env["move_speed"] *= -1
+                canvas.coords(env["id"], env["cx"] + math.cos(env["angle"]) * env["radius"], env["cy"] + math.sin(env["angle"]) * env["radius"])
+            if len(enemies) < 3 and kill_count + len(enemies) < required_kills: spawn_ojisan()
+            if kill_count >= required_kills: game_state = "SPAWN_BOSS"
 
         elif game_state == "SPAWN_BOSS":
-            for env in enemies: 
-                canvas.delete(env["id"])
+            for env in enemies: canvas.delete(env["id"])
             enemies.clear()
-
-            # 【最終対策】トーフ回避処理
-            # もしboss_imgがロードできていれば、何が何でもそれを描画！
-            if boss_img is not None:
-                boss_char = canvas.create_image(boss_x, boss_y, image=boss_img)
+            if boss_normal_img is not None:
+                boss_char = canvas.create_image(boss_x, boss_y, image=boss_normal_img)
             else:
-                # それでもダメなら、Tkinter標準の文字(大きな文字)で「くまお」というテキスト生命体を生成してトーフの見た目を上書き破壊するわ！
-                boss_char = canvas.create_text(boss_x, boss_y, text="🐻\nくまお", fill="#ff5555", font=("MS Gothic", 48, "bold"), justify="center")
-            
+                boss_char = canvas.create_text(boss_x, boss_y, text="🐻\nくまお", fill="#ff5555", font=("MS Gothic", 48, "bold"))
             canvas.itemconfig(boss_txt, text="⚠️ BOSS: 凶悪クママシーン くまお ⚠️", state="normal")
             canvas.itemconfig(b_hp_bar_bg, state="normal")
             canvas.itemconfig(b_hp_bar, state="normal")
-            
             game_state = "BOSS"
             game_win.after(30, update_game)
             return
 
-        elif game_state == "BOSS":
-            if boss_char is not None:
-                boss_x += boss_dir
-                if boss_x <= 150 or boss_x >= 650: 
-                    boss_dir *= -1
-                
-                boss_angle += 0.06
-                actual_y = boss_y + math.sin(boss_angle) * 25
-                canvas.coords(boss_char, boss_x, actual_y)
+        elif game_state == "BOSS" and boss_char is not None:
+            boss_x += boss_dir
+            if boss_x <= 150 or boss_x >= 650: boss_dir *= -1
+            boss_angle += 0.06
+            actual_y = boss_y + math.sin(boss_angle) * 25
+            canvas.coords(boss_char, boss_x, actual_y)
+            
+            attack_tick += 1
+            hp_ratio = boss_hp / boss_max_hp
 
-                if random.random() < 0.12:
+            # --- 💡 【リアルタイム・フェーズ3変身ロジック】 💡 ---
+            if hp_ratio >= 0.70:
+                if attack_tick % 10 == 0:
                     bb = canvas.create_oval(boss_x-8, actual_y+30, boss_x+8, actual_y+50, fill="#ff5555", outline="white")
-                    b_bullets.append(bb)
+                    b_bullets.append({"id": bb, "vx": 0, "vy": 12})
+            
+            elif hp_ratio >= 0.35:
+                canvas.itemconfig(boss_txt, text="⚠️ BOSS: フェーズ2 全方位リング弾幕！ ⚠️", fill="#ffb86c")
+                if attack_tick % 25 == 0:
+                    num_bullets = 12
+                    for i in range(num_bullets):
+                        angle = (math.pi * 2 / num_bullets) * i
+                        bx = boss_x + math.cos(angle) * 40
+                        by = actual_y + math.sin(angle) * 40
+                        bb = canvas.create_oval(bx-6, by-6, bx+6, by+6, fill="#ffb86c", outline="white")
+                        b_bullets.append({"id": bb, "vx": math.cos(angle) * 7, "vy": math.sin(angle) * 7})
+            
+            else:
+                # 🔥 【フェーズ3：スーパーサイヤくまお覚醒！！】
+                canvas.itemconfig(boss_txt, text="⚡️ BOSS: フェーズ3 スーパーサイヤ人覚醒・くまお！！ ⚡️", fill="#ffff55")
+                
+                # 最初にフェーズ3に入った瞬間、画像を『くまお覚醒.jpg』に切り替えるわ！
+                if not has_transformed:
+                    if boss_awakened_img is not None:
+                        canvas.itemconfig(boss_char, image=boss_awakened_img)
+                        print("🐻🔥 ボスが『スーパーサイヤ人くまお』に変身したわ！！")
+                    has_transformed = True
+                    # 覚醒の衝撃波エフェクト（一瞬画面を白くするようなお遊び）
+                    flash = canvas.create_rectangle(0, 0, 800, 600, fill="#ffffdd")
+                    game_win.after(100, lambda: canvas.delete(flash))
 
-        # プレイヤー弾移動・当たり判定
+                # 発狂・狂気のスパイラル弾幕（さらに弾速を少し上げたわ！）
+                if attack_tick % 3 == 0:
+                    spiral_angle += 0.4
+                    for offset in [0, math.pi]:
+                        angle = spiral_angle + offset
+                        bx = boss_x + math.cos(angle) * 30
+                        by = actual_y + math.sin(angle) * 30
+                        bb = canvas.create_oval(bx-5, by-5, bx+5, by+5, fill="#ffff55", outline="#ff5555")
+                        b_bullets.append({"id": bb, "vx": math.cos(angle) * 7, "vy": math.sin(angle) * 7 + 2.5})
+
+        # 自機弾移動
         survived_m_bullets = []
         for b in m_bullets:
             canvas.move(b, 0, -18)
             coords = canvas.coords(b)
-            if not coords or coords[1] < 0:
-                canvas.delete(b)
-                continue
-                
+            if not coords or coords[1] < 0: canvas.delete(b); continue
             bx, by = (coords[0] + coords[2])/2, (coords[1] + coords[3])/2
             hit = False
 
@@ -313,98 +301,90 @@ def start_mesugaki_shooting():
                     try: ex, ey = canvas.coords(env["id"])
                     except: continue
                     if (ex - 40 < bx < ex + 40) and (ey - 50 < by < ey + 50):
-                        canvas.delete(b)
-                        canvas.delete(env["id"])
-                        enemies.remove(env)
+                        canvas.delete(b); canvas.delete(env["id"]); enemies.remove(env)
                         kill_count += 1
                         canvas.itemconfig(score_txt, text=f"おじさん討伐数: {kill_count} / {required_kills}")
-                        
-                        txt = canvas.create_text(ex, ey + 40, text=random.choice(nonoshiri_words), fill="#50fa7b", font=("MS Gothic", 14, "bold"))
+                        txt = canvas.create_text(ex, ey + 40, text=random.choice(nonoshiri_words), fill="#50fa7b", font=("MS Gothic", 12, "bold"))
                         effects.append((txt, time.time()))
-                        hit = True
-                        break
-                        
+                        hit = True; break
             elif game_state == "BOSS" and boss_char is not None:
                 if (boss_x - 95 < bx < boss_x + 95) and (boss_y - 105 < by < boss_y + 105):
-                    canvas.delete(b)
-                    boss_hp -= 5
-                    hit = True
+                    canvas.delete(b); boss_hp -= 5; hit = True
                     canvas.coords(b_hp_bar, 200, 45, 200 + int(400 * (max(0, boss_hp) / boss_max_hp)), 60)
-                    
                     if boss_hp <= 0:
-                        canvas.delete(boss_char)
-                        game_state = "CLEAR"
-                        canvas.create_text(400, 300, text="✨ STAGE CLEAR ✨\n\n「ふぅ…大物だったわね。おじさん、アタシが\n守ってあげたんだから一生感謝しなさいよね！♡」", fill="#50fa7b", font=("MS Gothic", 18, "bold"), justify="center")
-                        for bb in b_bullets: canvas.delete(bb)
+                        canvas.delete(boss_char); game_state = "CLEAR"
+                        canvas.create_text(400, 300, text="✨ STAGE CLEAR ✨\n\nスーパーサイヤくまおを倒すなんて生意気！\nでも、アタシのために頑張ってくれてありがと♡", fill="#50fa7b", font=("MS Gothic", 16, "bold"), justify="center")
                         return
 
-            if not hit:
-                survived_m_bullets.append(b)
-                
-        m_bullets.clear()
-        m_bullets.extend(survived_m_bullets)
+            if not hit: survived_m_bullets.append(b)
+        m_bullets[:] = survived_m_bullets
 
-        # 敵弾移動・被弾判定
+        # 敵弾移動
         survived_b_bullets = []
-        for bb in b_bullets:
-            canvas.move(bb, 0, 12)
+        for bdata in b_bullets:
+            bb = bdata["id"]
+            canvas.move(bb, bdata["vx"], bdata["vy"])
             coords = canvas.coords(bb)
-            if not coords or coords[1] > 600:
-                canvas.delete(bb)
-                continue
-                
+            if not coords or coords[1] > 600 or coords[0] < 0 or coords[0] > 800:
+                canvas.delete(bb); continue
             bbx, bby = (coords[0] + coords[2])/2, (coords[1] + coords[3])/2
             b_hit = False
 
             if (m_x - 35 < bbx < m_x + 35) and (m_y - 45 < bby < m_y + 45):
-                canvas.delete(bb)
-                m_hp -= 10
-                b_hit = True
+                canvas.delete(bb); m_hp -= 10; b_hit = True
                 canvas.coords(m_hp_bar, 120, 565, 120 + int(200 * (max(0, m_hp) / m_max_hp)), 585)
-                
-                canvas.config(bg="#441111")
-                game_win.after(50, lambda: canvas.config(bg="#111122"))
-
                 if m_hp <= 0:
                     game_state = "GAMEOVER"
-                    canvas.create_text(400, 300, text="☠️ GAME OVER ☠️\n\n「あはは！熊さんに負けてやんの！\nおじさん本当のクソザコね！ざぁ〜こ♡」", fill="#ff5555", font=("MS Gothic", 20, "bold"), justify="center")
+                    canvas.create_text(400, 300, text="☠️ GAME OVER ☠️\n\n覚醒したくまおの敵じゃなかったね！\nおじさん本当にお疲れ様、クソザコなんだから♡", fill="#ff5555", font=("MS Gothic", 16, "bold"), justify="center")
                     return
-            
-            if not b_hit:
-                survived_b_bullets.append(bb)
-                
-        b_bullets.clear()
-        b_bullets.extend(survived_b_bullets)
+            if not b_hit: survived_b_bullets.append(bdata)
+        b_bullets[:] = survived_b_bullets
 
-        curr_effects = effects[:]
-        for fx, t in curr_effects:
-            if time.time() - t > 0.6:
-                canvas.delete(fx)
-                effects.remove((fx, t))
-
+        effects[:] = [(fx, t) for fx, t in effects if (canvas.delete(fx) if time.time() - t > 0.6 else True)]
         game_win.after(30, update_game)
 
-    # 【重要】もしおじさんのフォルダに直接「くまお.jpg」が置いてあるなら、プログラム起動時に全力でそれをキャッシュするわ！
-    if os.path.exists("くまお.jpg"):
-        try:
-            boss_img = ImageTk.PhotoImage(Image.open("くまお.jpg").resize((180, 200)), master=game_win)
-        except:
-            pass
-
     update_game()
-    game_win.mainloop()
+
+# --- 6. ホームランチャーUI ---
+def show_radar_map():
+    subprocess.Popen(["cmd", "/c", "start", "https://www.jma.go.jp/bosai/nowc/"])
+
+def create_home_launcher():
+    root = tk.Tk()
+    root.title("💖 メスガキ・マルチホームシステムランチャー 💖")
+    root.geometry("600x500")
+    root.configure(bg="#1a1a2e")
+
+    title_lbl = tk.Label(root, text="♡ メスガキお助けホームポータル ♡", bg="#1a1a2e", fg="#ff79c6", font=("MS Gothic", 18, "bold"))
+    title_lbl.pack(pady=15)
+
+    status_frame = tk.LabelFrame(root, text=" 現在のリアルタイムデータ ", bg="#161625", fg="#50fa7b", font=("MS Gothic", 11, "bold"), padx=15, pady=10)
+    status_frame.pack(fill="x", padx=20, pady=10)
+
+    weather_lbl = tk.Label(status_frame, text="☀️ 天気情報: 読み込み中...", bg="#161625", fg="white", font=("MS Gothic", 11), justify="left", anchor="w")
+    weather_lbl.pack(fill="x", pady=2)
+    warning_lbl = tk.Label(status_frame, text="📢 警報発令: 読み込み中...", bg="#161625", fg="#ff5555", font=("MS Gothic", 11), justify="left", anchor="w")
+    warning_lbl.pack(fill="x", pady=2)
+    kuma_lbl = tk.Label(status_frame, text="🐻 熊さん注意報: 覚醒くまおがスタンバってるわ♡", bg="#161625", fg="#ffb86c", font=("MS Gothic", 11), justify="left", anchor="w")
+    kuma_lbl.pack(fill="x", pady=2)
+
+    def refresh_panel():
+        info = fetch_weather_and_warnings()
+        phrase = get_mesugaki_phrase()
+        weather_lbl.config(text=f"☀️ 天気：{info['weather']}")
+        warning_lbl.config(text=f"📢 警報：{info['warning']}")
+        kuma_lbl.config(text=f"🐻 熊情報：{phrase['kuma']}")
+    refresh_panel()
+
+    btn_style = {"font": ("MS Gothic", 12, "bold"), "fg": "white", "bd": 0, "cursor": "hand2", "pady": 10}
+    tk.Button(root, text="🎮 覚醒くまおシューティングを起動 (周回可能)", bg="#ff5555", command=lambda: start_mesugaki_shooting(root), **btn_style).pack(fill="x", padx=40, pady=8)
+    tk.Button(root, text="🗺️ 気象庁公式：リアルタイム雨雲レーダー地図", bg="#1f4068", command=show_radar_map, **btn_style).pack(fill="x", padx=40, pady=8)
+    tk.Button(root, text="🔄 手動でデータ最新情報に更新する", bg="#16c79a", command=refresh_panel, **btn_style).pack(fill="x", padx=40, pady=8)
+    tk.Button(root, text="システムを終了してアタシを解放する", bg="#434343", font=("MS Gothic", 10), fg="white", bd=0, command=root.destroy).pack(side="bottom", pady=15)
+
+    threading.Thread(target=background_weather_monitor, daemon=True).start()
+    win_notification_safe("♡ ホームシステム起動完了 ♡", get_mesugaki_phrase()["aisatsu"])
+    root.mainloop()
 
 if __name__ == "__main__":
-    print("--------------------------------------------------")
-    print("【トーフ完全滅亡】くまお画像実体化Ver 起動！！")
-    print("--------------------------------------------------")
-    
-    notification_list = get_mesugaki_info_list()
-    for current_title, current_msg in notification_list:
-        win_notification_safe(current_title, current_msg)
-        time.sleep(2.5)
-        
-    print("通知完了！今度こそトーフを破壊して、本物のバトルを始めるわよ！♡")
-    time.sleep(1.0)
-    
-    start_mesugaki_shooting()
+    create_home_launcher()  
