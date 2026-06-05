@@ -25,7 +25,6 @@ html, body {
 .header-date { font-size: 14px; color: #bdc3c7; }
 .dashboard { display: flex; flex-direction: column; flex: 1; height: 100%; width: 100%; overflow: hidden; }
 
-/* 天気＆アラートバー：スマホでは折り返してコンパクトに */
 .weather-bear-alert {
   background: linear-gradient(135deg, #7f8c8d 0%, #95a5a6 100%);
   color: #fff; padding: 12px 20px; display: flex; gap: 15px; align-items: center;
@@ -41,14 +40,21 @@ html, body {
 .alert-message .alert-title { font-size: 14px; font-weight: bold; display: flex; align-items: center; gap: 6px; margin: 0; }
 .alert-message .alert-desc { font-size: 11px; opacity: 0.95; margin-top: 2px; }
 
-/* コンテンツボディ：PCでは横並び、スマホでは縦並び */
 .content-body { display: flex; flex-direction: row; flex: 1; width: 100%; height: 100%; position: relative; overflow: hidden; }
 
-/* サイドバー：スマホでは横幅いっぱいにし、高さの上限を設定 */
+/* サイドバー：PC版の設定 */
 .sidebar {
   width: 380px; min-width: 380px; background: #fff; border-right: 1px solid #dcdde1;
   display: flex; flex-direction: column; height: 100%; flex-shrink: 0; z-index: 10;
 }
+/* PC版ではサイドバー自体をスクロールさせず、リスト部分だけをスクロールさせる */
+.sidebar-scroll-wrapper {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
 .weather-advice { padding: 10px 15px; background: #f8f9fa; border-bottom: 1px solid #eee; font-size: 12px; line-height: 1.4; color: #475569; flex-shrink: 0; }
 .weather-advice h3 { font-size: 13px; color: #2c3e50; margin-top: 0; margin-bottom: 4px; display: flex; align-items: center; gap: 4px; }
 .weather-forecast-container { padding: 10px 15px; background: #ffffff; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
@@ -81,7 +87,10 @@ html, body {
 .fbtn.on-blue { background: #3498db; color: #fff; border-color: #3498db; }
 .select-ctrl { width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1; font-size: 13px; outline: none; }
 .list-hdr { padding: 8px 12px; background: #f1f5f9; font-size: 12px; font-weight: bold; color: #64748b; flex-shrink: 0; }
+
+/* PC版のリストの独立スクロール設定 */
 .list-scroll { flex: 1; overflow-y: auto; background: #fff; }
+
 .sitem { padding: 12px; border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: 0.2s; }
 .sitem:hover { background: #f8fafc; }
 .sitem-title { font-weight: bold; font-size: 13px; color: #2c3e50; margin-bottom: 4px; }
@@ -111,7 +120,6 @@ html, body {
 }
 .leaflet-control-gps:hover { background: #f4f4f4; }
 
-/* デバッグパネル：スマホでは小さく右上に配置 */
 .debug-panel {
   position: absolute; right: 20px; bottom: 20px; width: 340px; background: rgba(30, 41, 59, 0.95);
   color: #0fcc83; border-radius: 8px; border: 1px solid #334155; box-shadow: 0 10px 25px rgba(0,0,0,0.4);
@@ -141,7 +149,6 @@ html, body {
   flex: 1; overflow-y: auto; color: #a7f3d0; white-space: pre;
 }
 
-/* モーダルウィンドウのレスポンシブ対応 */
 .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 2000; padding: 20px; }
 .modal-overlay.open { display: flex; }
 .modal-window { background: #fff; border-radius: 8px; width: 100%; max-width: 850px; height: 90vh; max-height: 750px; display: flex; flex-direction: column; box-shadow: 0 4px 20px rgba(0,0,0,0.15); overflow: hidden; }
@@ -165,20 +172,18 @@ html, body {
    ========================================================== */
 @media (max-width: 768px) {
   .header { padding: 8px 12px; }
-  .header h1 { font-size: 14px; }
+  .header h1 { font-size: 13px; }
   .header-date { font-size: 11px; }
 
-  /* 天気とアラートを縦に詰め、フォントサイズを微調整 */
   .weather-bear-alert { padding: 8px 12px; gap: 10px; }
   .w-card { padding: 4px 10px; gap: 6px; }
   .w-info .w-temp { font-size: 18px; }
   .alert-message .alert-title { font-size: 12px; }
   .alert-message .alert-desc { font-size: 10px; }
 
-  /* 画面を上下２分割（上がサイドバー情報、下が地図） */
+  /* 画面分割：上半分をサイドバー（45%）、下半分を地図（55%） */
   .content-body { flex-direction: column; }
   
-  /* サイドバーの固定幅を解除し、全体の高さを45%に制限 */
   .sidebar {
     width: 100%;
     min-width: 100%;
@@ -186,28 +191,37 @@ html, body {
     border-right: none;
     border-bottom: 1px solid #dcdde1;
   }
+
+  /* 【ここを修正】スマホ時に要素が溢れても見られるよう、包んでいるラッパー側をスクロール可能に */
+  .sidebar-scroll-wrapper {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch; /* iOSのスクロールを滑らかにする */
+  }
+
+  /* スマホの時はリスト部分自体の独立スクロールを解除し、全体のスクロールに委ねる */
+  .list-scroll { 
+    overflow-y: visible; 
+    height: auto;
+    flex: none;
+  }
   
-  /* 地図を画面の下半分（55%）いっぱいに広げる */
   #map {
     width: 100%;
     height: 55%;
   }
 
-  /* スクロール箇所の文字サイズや余白の調整 */
-  .weather-advice { padding: 6px 12px; font-size: 11px; }
-  .weather-forecast-container { padding: 6px 12px; }
+  .weather-advice { padding: 8px 12px; font-size: 11px; }
+  .weather-forecast-container { padding: 8px 12px; }
   .filter-box { padding: 8px; }
   .list-hdr { padding: 6px 12px; }
 
-  /* 投稿モーダルのスマホ対応 */
   .modal-window { height: 95vh; max-height: 95vh; }
   .modal-body { flex-direction: column; gap: 10px; padding: 10px; }
   .modal-right { width: 100%; }
-  #mini-map { min-height: 180px; height: 180px; }
+  #mini-map { min-height: 160px; height: 160px; }
 
-  /* デバッグパネルを小さく配置 */
-  .debug-panel { width: 280px; right: 10px; bottom: 10px; }
-  .debug-panel.expanded { height: 300px; }
+  .debug-panel { width: 260px; right: 10px; bottom: 10px; }
+  .debug-panel.expanded { height: 280px; }
 }
 </style>
 </head>
@@ -238,36 +252,38 @@ html, body {
     
     <div class="content-body">
       <div class="sidebar">
-        <div class="weather-advice">
-          <h3>💡 本日の気象連動アドバイス</h3>
-          <p id="weather-advice-text">周囲の状況に注意し、山林付近や見通しの悪い場所に入る際は音の出るものを携帯してください。</p>
-        </div>
-        
-        <div class="weather-forecast-container">
-          <div class="weather-forecast-title">⏳ 3時間ごとの天気予報（直近24時間）</div>
-          <div class="weather-timeline" id="weather-timeline">
-            <div style="font-size:12px; color:#94a3b8; padding:5px;">予報データを読み込み中...</div>
+        <div class="sidebar-scroll-wrapper">
+          <div class="weather-advice">
+            <h3>💡 本日の気象連動アドバイス</h3>
+            <p id="weather-advice-text">周囲の状況に注意し、山林付近や見通しの悪い場所に入る際は音の出るものを携帯してください。</p>
           </div>
-        </div>
-        
-        <div class="filter-box">
-          <div id="type-filters">
-            <div class="fbtn on" data-t="all">すべて</div>
-            <div class="fbtn" data-t="目撃">目撃・痕跡</div>
-            <div class="fbtn" data-t="人身被害">人身被害</div>
-            <div class="fbtn" data-t="気象災害">気象災害</div>
+          
+          <div class="weather-forecast-container">
+            <div class="weather-forecast-title">⏳ 3時間ごとの天気予報（直近24時間）</div>
+            <div class="weather-timeline" id="weather-timeline">
+              <div style="font-size:12px; color:#94a3b8; padding:5px;">予報データを読み込み中...</div>
+            </div>
           </div>
-          <select class="select-ctrl" id="year-select">
-            <option value="all">すべての年</option>
-          </select>
-        </div>
-        
-        <div class="list-hdr" id="list-count">0件の情報</div>
-        <div class="list-scroll" id="sightings-list"></div>
-        
-        <div class="action-panel">
-          <button class="btn-primary" id="open-modal">➕ 情報を投稿する</button>
-          <button class="btn-export" id="export-json">💾 ファイルを保存</button>
+          
+          <div class="filter-box">
+            <div id="type-filters">
+              <div class="fbtn on" data-t="all">すべて</div>
+              <div class="fbtn" data-t="目撃">目撃・痕跡</div>
+              <div class="fbtn" data-t="人身被害">人身被害</div>
+              <div class="fbtn" data-t="気象災害">気象災害</div>
+            </div>
+            <select class="select-ctrl" id="year-select">
+              <option value="all">すべての年</option>
+            </select>
+          </div>
+          
+          <div class="list-hdr" id="list-count">0件の情報</div>
+          <div class="list-scroll" id="sightings-list"></div>
+          
+          <div class="action-panel">
+            <button class="btn-primary" id="open-modal">➕ 情報を投稿する</button>
+            <button class="btn-export" id="export-json">💾 ファイルを保存</button>
+          </div>
         </div>
       </div>
       
@@ -519,7 +535,6 @@ function moveToCurrentLocation() {
       loadWeatherData(lat, lng, "現在地周辺");
       logDebug("現在地への移動を実行しました");
     },
-    () => { alert("位置特定できませんでした"); },
     () => { alert("位置特定できませんでした"); },
     { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
   );
