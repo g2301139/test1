@@ -1,32 +1,43 @@
+import streamlit as st
 import folium
-from folium.plugins import Geocoder
-import os
+from folium.plugins import Geocoder  
+import streamlit.components.v1 as components
 
-# 1. マップの作成
+# 画面を横いっぱいに広げる設定
+st.set_page_config(layout="wide")
+
+# 1. マップの作成（初期ズーム17の超ドアップ設定）
 akita_map = folium.Map(
     location=[39.7169, 140.1292], 
     zoom_start=17,                
     min_zoom=8,
     max_zoom=18,                  
     height='100%', 
-    tiles=None,
+    tiles=None,                   
     max_bounds=True,
-    # ⚠️ もし秋田県外でテストしている場合は、下の4行を消すか先頭に # をつけてください
     min_lat=38.8, max_lat=40.5,
     min_lon=139.3, max_lon=141.0
 )
 
-# 地図レイヤーの追加
-folium.TileLayer('OpenStreetMap', name='通常の地図', control=True).add_to(akita_map)
-folium.TileLayer('https://cyberjapandata.gsi.go.jp/xyz/ort/{z}/{x}/{y}.jpg', attr='国土地理院', name='航空写真', control=True).add_to(akita_map)
+# ① 通常の道路地図（OpenStreetMap）
+folium.TileLayer('OpenStreetMap', name='通常の地図（道路・建物）', control=True).add_to(akita_map)
+
+# ② 国土地理院 航空写真
+folium.TileLayer('https://cyberjapandata.gsi.go.jp/xyz/ort/{z}/{x}/{y}.jpg', attr='国土地理院 航空写真', name='航空写真（上空からの景色）', control=True).add_to(akita_map)
+
+# ③ 国土地理院 淡色地図
+folium.TileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', attr='国土地理院 淡色地図', name='淡色地図（シンプル表示）', control=True).add_to(akita_map)
+
 folium.LayerControl(position='topright', collapsed=True).add_to(akita_map)
 
-# 秋田駅マーカー
+# 2. 目印として秋田駅にマーカーを設置
 folium.Marker([39.7169, 140.1292], popup='秋田駅', icon=folium.Icon(color='blue', icon='home')).add_to(akita_map)
+
+# 3. 🗺️ 検索機能（Geocoder）を追加
 Geocoder(collapsed=True, position='topleft', zoom=17, placeholder='場所を検索...').add_to(akita_map)
 
 # ========================================================
-# ⚡ 入れ子（iframe）なしでSafariのGPSを100%起動させるコード
+# ⚡ 【スマホ・Safari完全対応版】現在地ワープJavaScript
 # ========================================================
 custom_smartphone_script = """
 <style>
@@ -36,41 +47,84 @@ custom_smartphone_script = """
         background: white; border: 2px solid #ccc; padding: 8px 12px;
         border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 14px;
     }
+    .leaflet-control-layers {
+        margin-top: 60px !important; 
+        border: 2px solid #ccc !important;
+        border-radius: 5px !important;
+    }
 </style>
 <button id="current-location-btn" onclick="getLocation()">📱 現在地を取得</button>
 <script>
     var userMarker = null;
+
     function getLocation() {
-        if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(function(position) {
-                var lat = position.coords.latitude;
-                var lng = position.coords.longitude;
-                var maps = Object.keys(window).filter(k => k.startsWith('map_'));
-                if (maps.length > 0) {
-                    var mapObj = window[maps[0]];
-                    try {
-                        mapObj.flyTo([lat, lng], 17);
-                        if (userMarker) { mapObj.removeLayer(userMarker); }
-                        userMarker = L.circleMarker([lat, lng], {
-                            color: '#137cbd', fillColor: '#137cbd', fillOpacity: 0.8, radius: 8
-                        }).addTo(mapObj).bindPopup("あなたの現在地").openPopup();
-                    } catch(e) {
-                        alert("秋田県外にいませんか？\\nエラー: " + e.message);
-                    }
-                }
-            }, function(error) {
-                alert("GPS取得失敗。設定 > Safari > 位置情報 が『許可』になっているか確認してください。");
-            }, { enableHighAccuracy: true });
+        if (!navigator.geolocation) {
+            alert("お使いのブラウザはGPSに対応していません。");
+            return;
         }
+
+        // Safariのブロックを避けるため、精度設定を少しマイルドにします
+        var options = {
+            enableHighAccuracy: false, 
+            timeout: 10000,
+            maximumAge: 60000
+        };
+
+        navigator.geolocation.getCurrentPosition(function(position) {
+            var lat = position.coords.latitude;
+            var lng = position.coords.longitude;
+            
+            var maps = Object.keys(window).filter(k => k.startsWith('map_'));
+            if (maps.length > 0) {
+                var mapObj = window[maps[0]];
+                
+                try {
+                    mapObj.flyTo([lat, lng], 17);
+                    if (userMarker) { mapObj.removeLayer(userMarker); }
+                    userMarker = L.circleMarker([lat, lng], {
+                        color: '#137cbd', fillColor: '#137cbd', fillOpacity: 0.8, radius: 8
+                    }).addTo(mapObj).bindPopup("あなたの現在地（周辺）").openPopup();
+                } catch(e) {
+                    alert("⚠️ 秋田県外にいませんか？\\nエラー: " + e.message);
+                }
+            }
+        }, function(error) {
+            var errorMsg = "";
+            switch(error.code) {
+                case error.PERMISSION_DENIED:
+                    errorMsg = "Safariまたはサイト設定で位置情報が禁止されています。";
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    errorMsg = "電波状況が悪いか、GPS信号が拾えません。";
+                    break;
+                case error.TIMEOUT:
+                    errorMsg = "タイムアウトしました。";
+                    break;
+                default:
+                    errorMsg = "未知のエラーです。";
+                    break;
+            }
+            alert("❌ GPS取得失敗:\\n" + errorMsg);
+        }, options);
     }
-    window.onload = function() { setTimeout(getLocation, 1000); };
+
+    window.onload = function() {
+        setTimeout(getLocation, 1500); 
+    };
 </script>
 """
 akita_map.get_root().header.add_child(folium.Element(custom_smartphone_script))
+# ========================================================
 
-# 💾 デスクトップに「map.html」として保存
-desktop_path = os.path.expanduser("~/Desktop")                 
-file_path = os.path.join(desktop_path, "map.html")   
+st.title("🗺️ 秋田 現在地GPSマップ")
+
+# 🔥【ここが修正のキモ】デスクトップではなく、サーバー内の同じフォルダに一時保存する
+file_path = "temp_map.html"
 akita_map.save(file_path)
 
-print(f"✅ デスクトップに『map.html』を作成しました！: {file_path}")
+# 保存したHTMLファイルを読み込んで、Streamlitのコンポーネントとして表示する
+with open(file_path, "r", encoding="utf-8") as f:
+    map_html = f.read()
+
+# 【Safari対策】位置情報の利用を明示的に許可した状態（allow="geolocation"）で埋め込み
+components.html(map_html, height=700, scrolling=True)
