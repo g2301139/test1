@@ -9,7 +9,7 @@ import json
 import time
 from datetime import datetime, timedelta
 
-# 【最優先】Streamlitの画面設定（横幅を広く使い、タイトルを設定）
+# 画面設定（横幅を広く使い、タイトルを設定）
 st.set_page_config(layout="wide", page_title="秋田お天気GPSマップ")
 
 # 秋田県全13市の緯度・経度データ
@@ -41,11 +41,10 @@ def get_weather_icon(code):
     elif 95 <= code <= 99: return "⛈️"
     else: return "❓"
 
-# 画面にメインタイトルを表示
 st.title("🗺️ 秋田 現在地GPS ＆ お天気レーダーマップ")
 
 # ========================================================
-# 📡 データのバックエンド取得処理
+# 📡 データのバックエンド取得処理（サーバー不要・API直結）
 # ========================================================
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -150,7 +149,7 @@ labels_json = json.dumps(js_labels)
 
 
 # ========================================================
-# 🗺️ ベースマップの作成（秋田全体表示、初期タイルをNoneにして追加）
+# 🗺️ ベースマップの作成（地図切り替えコントロール付き）
 # ========================================================
 akita_map = folium.Map(
     location=[39.6, 140.1], 
@@ -187,10 +186,10 @@ folium.TileLayer(
     control=True
 ).add_to(akita_map)
 
-# レイヤー切り替えを右上に配置
+# レイヤー切り替えボタンを設置
 folium.LayerControl(position='topright', collapsed=True).add_to(akita_map)
 
-# 🗺️ 検索機能（Geocoder）を左上に追加
+# 🗺️ 検索機能（Geocoder）を追加
 Geocoder(
     collapsed=True, 
     position='topleft', 
@@ -200,10 +199,10 @@ Geocoder(
 
 
 # ========================================================
-# 🎨 UI表示アイテムと【自動高精度GPS起動】JavaScript
+# 🎨 画面上のパーツ（UI）と 高精度GPS自動ワープの合体スクリプト
 # ========================================================
-# 左側のコントロールUI（雨雲ボタン、現在地ボタン、スライダー）
-external_ui_html = f"""
+# ⚠️ エラーの原因だった `{}` カッコ問題を解決するため、Pythonのf-stringを一切使わずにHTMLを生成します
+external_ui_html = """
 <div id="independent-ui" style="position: fixed; top: 15px; left: 50px; z-index: 999999; background: rgba(255,255,255,0.95); padding: 15px; border-radius: 12px; border: 3px solid #0D47A1; box-shadow: 0 4px 10px rgba(0,0,0,0.4); width: 280px; font-family: sans-serif;">
     <button id="radar-btn" style="width: 100%; background: #2196F3; color: white; border: none; padding: 12px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
         🌧️ 雨雲レーダーをつける
@@ -213,117 +212,130 @@ external_ui_html = f"""
     </button>
     <div id="slider-box" style="display: none; margin-top: 15px;">
         <div style="font-weight: bold; margin-bottom: 8px; color: #333; text-align: center;">
-            時間: <span id="time-label" style="color: #d32f2f; font-size: 18px; border-bottom: 2px solid #d32f2f;">{js_labels[0]}</span>
+            時間: <span id="time-label" style="color: #d32f2f; font-size: 18px; border-bottom: 2px solid #d32f2f;"></span>
         </div>
-        <input type="range" id="time-slider" min="0" max="{len(js_urls)-1}" value="0" style="width: 100%; cursor: pointer; pointer-events: auto;">
+        <input type="range" id="time-slider" min="0" value="0" style="width: 100%; cursor: pointer; pointer-events: auto;">
         <div style="display: flex; justify-content: space-between; font-size: 12px; color: #666; font-weight: bold; margin-top: 5px;">
-            <span>{js_labels[0].split(' ')[0]}</span>
-            <span>{js_labels[-1].split(' ')[0]}</span>
+            <span id="label-start"></span>
+            <span id="label-end"></span>
         </div>
-        <div style="font-size: 13px; color: {msg_color}; font-weight: bold; margin-top: 10px; text-align: center; background: #f9f9f9; padding: 5px; border-radius: 5px;">
-            {success_msg}
+        <div id="success-msg-box" style="font-size: 13px; font-weight: bold; margin-top: 10px; text-align: center; background: #f9f9f9; padding: 5px; border-radius: 5px;">
         </div>
     </div>
 </div>
 """
 
-external_ui_script = f"""
+external_ui_script = """
 <script>
-document.addEventListener("DOMContentLoaded", function() {{
-    var urls = {urls_json};
-    var labels = {labels_json};
+document.addEventListener("DOMContentLoaded", function() {
+    var urls = _URLS_JSON_;
+    var labels = _LABELS_JSON_;
+    var successMsg = "_SUCCESS_MSG_";
+    var msgColor = "_MSG_COLOR_";
     
     var mapObj = null;
     var userMarker = null;
-    var checkMapInterval = setInterval(function() {{
-        for (var key in window) {{
-            if (window[key] instanceof L.Map) {{
+    
+    // スライダーの最大値を設定
+    var slider = document.getElementById('time-slider');
+    if(slider) { slider.max = urls.length - 1; }
+    
+    // ラベルなどのテキストを代入
+    document.getElementById('time-label').innerText = labels[0];
+    document.getElementById('label-start').innerText = labels[0].split(' ')[0];
+    document.getElementById('label-end').innerText = labels[labels.length - 1].split(' ')[0];
+    
+    var msgBox = document.getElementById('success-msg-box');
+    msgBox.innerText = successMsg;
+    msgBox.style.color = msgColor;
+
+    var checkMapInterval = setInterval(function() {
+        for (var key in window) {
+            if (window[key] instanceof L.Map) {
                 mapObj = window[key];
                 clearInterval(checkMapInterval);
                 initLogic();
                 break;
             }
         }
-    }}, 500);
+    }, 500);
 
-    function initLogic() {{
-        var radarLayer = L.tileLayer(urls[0], {{opacity: 0.6, zIndex: 1000}});
+    function initLogic() {
+        var radarLayer = L.tileLayer(urls[0], {opacity: 0.6, zIndex: 1000});
         var isRadarOn = false;
         
         var btn = document.getElementById('radar-btn');
         var gpsBtn = document.getElementById('gps-btn');
         var sliderBox = document.getElementById('slider-box');
-        var slider = document.getElementById('time-slider');
         var timeLabel = document.getElementById('time-label');
         
         var ui = document.getElementById('independent-ui');
-        ['mousedown', 'touchstart', 'dblclick', 'wheel', 'pointerdown'].forEach(function(evt) {{
-            ui.addEventListener(evt, function(e) {{ e.stopPropagation(); }});
-        }});
+        ['mousedown', 'touchstart', 'dblclick', 'wheel', 'pointerdown'].forEach(function(evt) {
+            ui.addEventListener(evt, function(e) { e.stopPropagation(); });
+        });
 
-        btn.addEventListener('click', function() {{
+        btn.addEventListener('click', function() {
             isRadarOn = !isRadarOn;
-            if (isRadarOn) {{
+            if (isRadarOn) {
                 btn.style.background = '#f44336';
                 btn.innerHTML = '☀️ 雨雲をけす';
                 sliderBox.style.display = 'block';
-                if (urls[slider.value] !== "") {{
+                if (urls[slider.value] !== "") {
                     radarLayer.addTo(mapObj);
                     radarLayer.setUrl(urls[slider.value]);
-                }}
-            } else {{
+                }
+            } else {
                 btn.style.background = '#2196F3';
                 btn.innerHTML = '🌧️ 雨雲レーダーをつける';
                 sliderBox.style.display = 'none';
                 mapObj.removeLayer(radarLayer);
             }
-        }});
+        });
 
-        slider.addEventListener('input', function(e) {{
+        slider.addEventListener('input', function(e) {
             e.stopPropagation();
             var idx = this.value;
             timeLabel.innerText = labels[idx];
-            if (isRadarOn && urls[idx] !== "") {{
+            if (isRadarOn && urls[idx] !== "") {
                 radarLayer.setUrl(urls[idx]);
             }
-        }});
+        });
 
-        // 【修正版】高精度で現在地を強制取得する自動追跡ワープ関数
-        function findMe() {{
-            if (navigator.geolocation) {{
-                var gpsOptions = {{
+        function findMe() {
+            if (navigator.geolocation) {
+                var gpsOptions = {
                     enableHighAccuracy: true,
                     timeout: 10000,
                     maximumAge: 0
-                }};
-                navigator.geolocation.getCurrentPosition(function(position) {{
+                };
+                navigator.geolocation.getCurrentPosition(function(position) {
                     var lat = position.coords.latitude;
                     var lng = position.coords.longitude;
-                    mapObj.flyTo([lat, lng], 17);  // ズーム17の超ドアップ
-                    if (userMarker) {{ mapObj.removeLayer(userMarker); }}
-                    userMarker = L.circleMarker([lat, lng], {{
+                    mapObj.flyTo([lat, lng], 17);
+                    if (userMarker) { mapObj.removeLayer(userMarker); }
+                    userMarker = L.circleMarker([lat, lng], {
                         color: '#137cbd', fillColor: '#137cbd', fillOpacity: 0.8, radius: 8
-                    }}).addTo(mapObj).bindPopup("あなたの現在地").openPopup();
-                }}, function(error) {{
-                    console.log("GPS自動起動失敗。ブラウザの設定または電波状況を確認してください。");
-                }}, gpsOptions);
+                    }).addTo(mapObj).bindPopup("あなたの現在地").openPopup();
+                }, function(error) {
+                    console.log("GPS自動起動失敗。位置情報サービスをONにしてください。");
+                }, gpsOptions);
             }
-        }}
+        }
 
-        // ① ボタン押下時
         gpsBtn.addEventListener('click', findMe);
-
-        // ② 読み込み完了0.5秒後の自動実行
-        setTimeout(findMe, 500);
-    }}
-}});
+        setTimeout(findMe, 600);
+    }
+});
 </script>
 """
 
-akita_map.get_root().html.add_child(folium.Element(external_ui_html))
-akita_map.get_root().html.add_child(folium.Element(external_ui_script))
+# 安全に変数をスクリプト内に埋め込む
+final_script = external_ui_script.replace("_URLS_JSON_", urls_json).replace("_LABELS_JSON_", labels_json).replace("_SUCCESS_MSG_", success_msg).replace("_MSG_COLOR_", msg_color)
 
-# 右上：いまの天気一覧パネルの組み込み
+akita_map.get_root().html.add_child(folium.Element(external_ui_html))
+akita_map.get_root().html.add_child(folium.Element(final_script))
+
+# 右上：いまの天気一覧パネル
 summary_html = """
 <div style="position: fixed; top: 15px; right: 15px; z-index: 999999; background-color: white; border: 3px solid #333; padding: 10px; border-radius: 10px; box-shadow: 4px 4px 10px rgba(0,0,0,0.4); width: 220px; max-height: 45vh; overflow-y: auto; font-family: sans-serif;">
     <div style="font-weight: bold; font-size: 16px; margin-bottom: 8px; text-align: center; border-bottom: 2px solid #333;">🌡️ いまの天気</div>
@@ -340,7 +352,7 @@ for i, city_name in enumerate(AKITA_CITIES.keys()):
 summary_html += "</table></div>"
 akita_map.get_root().html.add_child(folium.Element(summary_html))
 
-# 左下：防災お天気アラートパネルの組み込み
+# 左下：防災お天気アラートパネル
 warning_html = f"""
 <div style="position: fixed; bottom: 15px; left: 15px; z-index: 999999; background-color: #FFF0F0; border: 3px solid #d32f2f; padding: 15px; border-radius: 12px; font-family: sans-serif; box-shadow: 3px 3px 6px rgba(0,0,0,0.4); width: 380px; max-height: 180px; overflow-y: auto;">
     <div style="color: #d32f2f; font-size: 18px; font-weight: bold; margin-bottom: 8px;">⚠️ 防災・天気のお知らせ</div>
@@ -351,13 +363,12 @@ akita_map.get_root().html.add_child(folium.Element(warning_html))
 
 
 # ========================================================
-# 🏙️ 各都市のお天気マーカー ＆ タップで週間天気表示ポップアップ
+# 🏙️ 各都市のお天気マーカー ＆ ポップアップ
 # ========================================================
 for i, (city_name, coords) in enumerate(AKITA_CITIES.items()):
     current = weather_data[i]["current_weather"]
     daily = weather_data[i]["daily"]
     
-    # 吹き出し（ポップアップ）の中身を作成
     popup_html = f"<h3 style='margin:0 0 10px 0;'>📅 {city_name}の1週間</h3>"
     popup_html += "<table style='width: 350px; text-align: center; font-size: 16px; border-collapse: collapse;'>"
     popup_html += "<tr style='background-color: #eee;'><th>日</th><th>空</th><th>最高</th><th>最低</th></tr>"
@@ -371,7 +382,6 @@ for i, (city_name, coords) in enumerate(AKITA_CITIES.items()):
         popup_html += f"<tr style='border-bottom: 1px solid #ccc; height: 35px;'><td>{date_str}</td><td style='font-size:20px;'>{get_weather_icon(w_code)}</td><td style='color:red;'>{t_max}℃</td><td style='color:blue;'>{t_min}℃</td></tr>"
     popup_html += "</table>"
 
-    # マップ上に表示されるかわいいお天気アイコンを作成
     marker_html = f"""
     <div style="background-color: white; border: 3px solid #333; border-radius: 10px; padding: 5px; text-align: center; width: 100px; cursor: pointer; box-shadow: 3px 3px 6px rgba(0,0,0,0.3);">
         <div style="font-size: 14px; font-weight: bold;">{city_name}</div>
@@ -385,8 +395,5 @@ for i, (city_name, coords) in enumerate(AKITA_CITIES.items()):
         popup=Popup(popup_html, max_width=400)
     ).add_to(akita_map)
 
-
-# ========================================================
-# 🚀 描画：Streamlit画面にマップをドカンと表示！
-# ========================================================
+# 🗺️ 地図をStreamlitに直接ドカンと表示！
 st_folium(akita_map, width="100%", height=700)
