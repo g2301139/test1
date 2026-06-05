@@ -148,7 +148,7 @@ labels_json = json.dumps(js_labels)
 # マップ生成
 akita_map = folium.Map(location=[39.6, 140.1], zoom_start=8, tiles="OpenStreetMap")
 
-# --- UIと【復活】GPS用JavaScriptコード ---
+# --- UIと【自動起動化】GPS用JavaScriptコード ---
 external_ui_html = f"""
 <div id="independent-ui" style="position: fixed; top: 15px; left: 50px; z-index: 999999; background: rgba(255,255,255,0.95); padding: 15px; border-radius: 12px; border: 3px solid #0D47A1; box-shadow: 0 4px 10px rgba(0,0,0,0.4); width: 280px; font-family: sans-serif;">
     <button id="radar-btn" style="width: 100%; background: #2196F3; color: white; border: none; padding: 12px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
@@ -234,24 +234,28 @@ document.addEventListener("DOMContentLoaded", function() {{
             }
         }});
 
-        // GPSワープ機能
-        gpsBtn.addEventListener('click', function() {{
+        // 現在地を見つける関数（開いた瞬間に自動実行＋ボタンでも実行）
+        function findMe() {{
             if (navigator.geolocation) {{
                 navigator.geolocation.getCurrentPosition(function(position) {{
                     var lat = position.coords.latitude;
                     var lng = position.coords.longitude;
-                    mapObj.flyTo([lat, lng], 15);
+                    mapObj.flyTo([lat, lng], 17);  // 👈 倍率17（ドアップ）でワープ！
                     if (userMarker) {{ mapObj.removeLayer(userMarker); }}
                     userMarker = L.circleMarker([lat, lng], {{
                         color: '#137cbd', fillColor: '#137cbd', fillOpacity: 0.8, radius: 8
                     }}).addTo(mapObj).bindPopup("あなたの現在地").openPopup();
                 }}, function(error) {{
-                    alert("GPSの取得に失敗しました。位置情報の許可を確認してください。");
+                    console.log("GPS自動ワープ失敗。ブラウザの位置設定を確認してください。");
                 }}, {{ enableHighAccuracy: true }});
-            } else {{
-                alert("お使いのブラウザはGPSに対応していません。");
-            }}
-        }});
+            }
+        }}
+
+        // ① ボタンクリック時に動くようにする
+        gpsBtn.addEventListener('click', findMe);
+
+        // ② 開いて0.5秒後に自動で動くようにする
+        setTimeout(findMe, 500);
     }}
 }});
 </script>
