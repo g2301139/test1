@@ -138,7 +138,6 @@ if len(js_urls) == 0:
     success_msg = "⚠️ レーダーデータが見つかりませんでした"
     msg_color = "#f44336"
 else:
-    # ⚠️ ここが最初の修正箇所です！「時間」という文字が含まれていればOKにしました
     success_msg = f"✅ 最大 {js_labels[-1]} まで取得成功" if "時間" in js_labels[-1] else "⚠️ 1時間以降のデータが見つかりませんでした"
     msg_color = "#4CAF50" if "時間" in js_labels[-1] else "#f44336"
 
