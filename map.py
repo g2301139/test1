@@ -2,6 +2,7 @@ import streamlit as st
 import folium
 from folium.plugins import Geocoder  
 import streamlit.components.v1 as components
+import os
 
 # 画面を横いっぱいに広げる設定
 st.set_page_config(layout="wide")
@@ -64,9 +65,9 @@ custom_smartphone_script = """
         }
 
         var options = {
-            enableHighAccuracy: false, 
+            enableHighAccuracy: true,  // 精度優先に変更
             timeout: 10000,
-            maximumAge: 60000
+            maximumAge: 0              // キャッシュを使わず常に最新を取得
         };
 
         navigator.geolocation.getCurrentPosition(function(position) {
@@ -84,11 +85,11 @@ custom_smartphone_script = """
                         color: '#137cbd', fillColor: '#137cbd', fillOpacity: 0.8, radius: 8
                     }).addTo(mapObj).bindPopup("あなたの現在地（周辺）").openPopup();
                 } catch(e) {
-                    alert("⚠️ 秋田県外にいませんか？\\nエラー: " + e.message);
+                    alert("⚠️ エラー: " + e.message);
                 }
             }
         }, function(error) {
-            alert("❌ GPS取得失敗。Safariの履歴リセットをお試しください。");
+            alert("❌ GPS取得失敗: " + error.message + "\\nSafariの「設定 -> プライバシーとセキュリティ -> 位置情報サービス」を確認してください。");
         }, options);
     }
 
@@ -103,13 +104,22 @@ akita_map.get_root().header.add_child(folium.Element(custom_smartphone_script))
 # タイトルを表示
 st.title("🗺️ 秋田 現在地GPSマップ")
 
-# 🗺️ 地図をHTMLにレンダリング
-map_html = akita_map.get_root().render()
+# 🗺️ 地図を一度HTMLファイルとして一時保存
+map_html_path = "temp_map.html"
+akita_map.save(map_html_path)
 
-# 🔥【超重要】Safariのブロックを解除する呪文（allow=geolocation と sandboxの全開放）を明示して表示
-# これにより、画面を真っ白にせず、Safariの厳重ガードだけを綺麗に突破します。
-components.html(
-    map_html, 
-    height=700, 
+# ファイルを読み込み
+with open(map_html_path, "r", encoding="utf-8") as f:
+    html_content = f.read()
+
+# 🔥【最重要】Safariのブロックを解除する iframe の直接埋め込み
+# allow="geolocation" を明示し、sandbox属性で必要な権限をすべて解放します。
+st.components.v1.html(
+    html_content,
+    height=700,
     scrolling=True
 )
+
+# 一時ファイルの削除（任意）
+if os.path.exists(map_html_path):
+    os.remove(map_html_path)
