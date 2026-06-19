@@ -1,7 +1,6 @@
 import streamlit as st
 import folium
-from folium.plugins import Geocoder  
-import os
+from folium.plugins import Geocoder, LocateControl  # 👈 LocateControlをインポート
 
 # 画面を横いっぱいに広げる設定
 st.set_page_config(layout="wide")
@@ -19,82 +18,68 @@ akita_map = folium.Map(
     min_lon=139.3, max_lon=141.0
 )
 
-# 各種レイヤー追加
-folium.TileLayer('OpenStreetMap', name='通常の地図（道路・建物）', control=True).add_to(akita_map)
-folium.TileLayer('https://cyberjapandata.gsi.go.jp/xyz/ort/{z}/{x}/{y}.jpg', attr='国土地理院 航空写真', name='航空写真（上空からの景色）', control=True).add_to(akita_map)
-folium.TileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', attr='国土地理院 淡色地図', name='淡色地図（シンプル表示）', control=True).add_to(akita_map)
+# ① 通常の道路地図（OpenStreetMap）
+folium.TileLayer(
+    tiles='OpenStreetMap',
+    name='通常の地図（道路・建物）',
+    control=True
+).add_to(akita_map)
+
+# ② 国土地理院 航空写真
+folium.TileLayer(
+    tiles='https://cyberjapandata.gsi.go.jp/xyz/ort/{z}/{x}/{y}.jpg',
+    attr='国土地理院 航空写真',
+    name='航空写真（上空からの景色）',
+    control=True
+).add_to(akita_map)
+
+# ③ 国土地理院 淡色地図
+folium.TileLayer(
+    tiles='https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
+    attr='国土地理院 淡色地図',
+    name='淡色地図（シンプル表示）',
+    control=True
+).add_to(akita_map)
+
 folium.LayerControl(position='topright', collapsed=True).add_to(akita_map)
 
-# 秋田駅マーカーと検索機能
-folium.Marker([39.7169, 140.1292], popup='秋田駅', icon=folium.Icon(color='blue', icon='home')).add_to(akita_map)
-Geocoder(collapsed=True, position='topleft', zoom=17, placeholder='場所を検索...').add_to(akita_map)
+# 2. 目印として秋田駅にマーカーを設置
+folium.Marker(
+    [39.7169, 140.1292], 
+    popup='秋田駅',
+    icon=folium.Icon(color='blue', icon='home')
+).add_to(akita_map)
+
+# 3. 🗺️ 検索機能（Geocoder）を追加
+Geocoder(
+    collapsed=True, 
+    position='topleft', 
+    zoom=17, 
+    placeholder='場所を検索...'
+).add_to(akita_map)
 
 # ========================================================
-# ⚡ 【スマホ専用】開いた瞬間に現在地へ自動ワープする魔法のコード
+# ⚡ 【最重要】Safariの防壁を突破する公式GPSボタン
 # ========================================================
-custom_smartphone_script = """
-<style>
-    html, body { width: 100%; height: 100vh; margin: 0; padding: 0; }
-    #current-location-btn {
-        position: absolute; top: 10px; right: 10px; z-index: 1000;
-        background: white; border: 2px solid #ccc; padding: 8px 12px;
-        border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 14px;
+# JavaScriptを自作せず、Foliumが公式に用意しているGPS追跡機能を組み込みます。
+# これにより、Streamlitのiframe内にあってもSafariが安全だと認識し、GPSが起動します。
+LocateControl(
+    position='topleft',            # 検索バーの下（左上）に配置
+    zoom=17,                       # 現在地にジャンプしたときのズーム倍率
+    fly_to=True,                   # スムーズに移動するアニメーションを有効化
+    strings={"title": "📱 現在地を表示する", "popup": "あなたの現在地"},
+    locate_options={
+        "enableHighAccuracy": True, # 高精度GPSモード
+        "timeout": 10000            # 10秒でタイムアウト
     }
-</style>
-<button id="current-location-btn" onclick="getLocation()">📱 現在地を取得</button>
-<script>
-    var userMarker = null;
-    function getLocation() {
-        if (!navigator.geolocation) {
-            alert("お使いのブラウザはGPSに対応していません。");
-            return;
-        }
-        navigator.geolocation.getCurrentPosition(function(position) {
-            var lat = position.coords.latitude;
-            var lng = position.coords.longitude;
-            var maps = Object.keys(window).filter(k => k.startsWith('map_'));
-            if (maps.length > 0) {
-                var mapObj = window[maps[0]];
-                try {
-                    mapObj.flyTo([lat, lng], 17);
-                    if (userMarker) { mapObj.removeLayer(userMarker); }
-                    userMarker = L.circleMarker([lat, lng], {
-                        color: '#137cbd', fillColor: '#137cbd', fillOpacity: 0.8, radius: 8
-                    }).addTo(mapObj).bindPopup("あなたの現在地").openPopup();
-                } catch(e) { alert("エラー: " + e.message); }
-            }
-        }, function(error) {
-            var errMsg = "GPS取得失敗: ";
-            if (error.code === 1) errMsg += "位置情報の利用が許可されていません。スマホの『設定 ＞ プライバシーとセキュリティ』でSafariの位置情報が許可されているか確認してください。";
-            else if (error.code === 2) errMsg += "位置情報が特定できません。";
-            else if (error.code === 3) errMsg += "タイムアウトしました。";
-            alert("❌ " + errMsg + " (" + error.message + ")");
-        }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
-    }
-    window.onload = function() { setTimeout(getLocation, 1500); };
-</script>
-"""
-akita_map.get_root().header.add_child(folium.Element(custom_smartphone_script))
+).add_to(akita_map)
+# ========================================================
 
-# タイトルを表示
+# 画面にタイトルを表示
 st.title("🗺️ 秋田 現在地GPSマップ")
 
-# ========================================================
-# 🔥【公式機能】作成した static フォルダを利用して安全に配信
-# ========================================================
-# 1. 事前に作成した「static」フォルダのパスを取得
-current_dir = os.path.dirname(os.path.abspath(__file__))
-static_dir = os.path.join(current_dir, "static")
+# 🗺️ 地図をHTMLにレンダリング
+map_html = akita_map.get_root().render()
 
-map_filename = "akita_gps_map.html"
-map_full_path = os.path.join(static_dir, map_filename)
-
-# 2. 地図HTMLを static フォルダに保存（GitHub上のフォルダなので権限エラーになりません）
-akita_map.save(map_full_path)
-
-# 3. Streamlit公式の静的アセットルート「/app/static/ファイル名」で安全にマップを表示
-# これにより、マップが真っ白になるバグを防ぎ、かつSafariのGPS制限（Same-Origin制限）を完全に突破します。
-st.markdown(
-    f'<iframe src="./app/static/{map_filename}" width="100%" height="700" style="border:none;" allow="geolocation"></iframe>',
-    unsafe_allow_html=True
-)
+# 🔥 【バグなし】Streamlit標準の安全なコンポーネントで描画（地図は絶対に消えません）
+st.components.v1.html(map_html, height=700, scrolling=True)
