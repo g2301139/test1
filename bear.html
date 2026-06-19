@@ -236,7 +236,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebas
 import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 // ========================================================
-// ⚠️ 【★ここを書き換える★】FirebaseのWeb設定コードを貼り付けてください
+// ⚠️ 【重要】Firebase管理画面から取得したご自身のキーを貼り付けてください
+//     YOUR_API_KEYなどのままだと通信エラーになります。
 // ========================================================
 const firebaseConfig = {
   apiKey: "YOUR_API_KEY",
@@ -269,7 +270,7 @@ window.addEventListener('DOMContentLoaded', () => {
   fetchJmaRadarTimestamps();
   // 3. OpenMeteo天気予報の取得
   loadOpenMeteoForecast();
-  // 4. Firebaseからリアルタイムにデータを取得して同期（他の人の投稿も即反映！）
+  // 4. Firebaseからリアルタイムにデータを取得して同期
   syncFirebaseData();
 });
 
@@ -293,16 +294,19 @@ function initMap() {
 }
 
 function syncFirebaseData() {
-  // collection(db, "bear_reports") の変更をリアルタイム監視
+  // リアルタイム監視と同時に、接続エラーを画面上にアラート表示するよう修正
   onSnapshot(collection(db, "bear_reports"), (snapshot) => {
     CSV_DATA = [];
     snapshot.forEach((doc) => {
       let data = doc.data();
-      data.id = doc.id; // 削除用にドキュメントIDを保存
+      data.id = doc.id; 
       CSV_DATA.push(data);
     });
     render();
-    loadOpenMeteoForecast(); // バナーの色判定を再更新
+    loadOpenMeteoForecast(); 
+  }, (error) => {
+    console.error("Firebaseの同期に失敗しました: ", error);
+    alert("【通信エラー】Firebaseからデータを読み込めません。\nFirebaseコンソールで『Firestore Database』が作成されているか、また『ルール』が許可（true）になっているか確認してください。\n詳細: " + error.message);
   });
 }
 
@@ -352,7 +356,8 @@ function loadOpenMeteoForecast() {
         tHtml += `<div class="forecast-item"><div class="forecast-time">${time}</div><div class="forecast-icon">${wIcon}</div><div class="forecast-temp">${temp}°C</div><div class="weather-details-mini"><div class="w-info-mini pop">☔${pop}%</div></div></div>`;
       }
       timeline.innerHTML = tHtml;
-    });
+    })
+    .catch(err => console.error("天気予報の取得に失敗しました: ", err));
 }
 
 function render() {
@@ -375,7 +380,6 @@ function render() {
       markers.addLayer(m);
     }
 
-    // 削除ボタン付きのリストアイテムを生成
     const item = document.createElement('div');
     item.className = 'sitem';
     item.innerHTML = `
@@ -386,14 +390,17 @@ function render() {
       </div>
     `;
     
-    // 【機能追加】取り消し（削除）ボタンの配置
     const delBtn = document.createElement('button');
     delBtn.className = 'btn-delete';
     delBtn.textContent = '❌ 取り消し';
     delBtn.onclick = async (e) => {
       e.stopPropagation();
       if(confirm("この投稿を取り消しますか？（他の人の画面からも消去されます）")) {
-        await deleteDoc(doc(db, "bear_reports", d.id));
+        try {
+          await deleteDoc(doc(db, "bear_reports", d.id));
+        } catch (error) {
+          alert("削除に失敗しました。権限がありません: " + error.message);
+        }
       }
     };
     item.appendChild(delBtn);
@@ -410,7 +417,6 @@ async function submitPost() {
   
   if(!city || !loc) { alert("市町村と詳しい場所を入力してください。"); return; }
 
-  // 簡易的にマップの中心にピンを立てる（GPSマーカーがあればその位置）
   let targetLat = map.getCenter().lat;
   let targetLng = map.getCenter().lng;
   if(userMarker) { targetLat = userMarker.getLatLng().lat; targetLng = userMarker.getLatLng().lng; }
@@ -428,14 +434,15 @@ async function submitPost() {
   };
 
   try {
-    // Firebaseに保存（これで自動的に他の人の画面にも降ってきます）
+    // 確実にデータ追加完了を待機するよう修正
     await addDoc(collection(db, "bear_reports"), newReport);
+    alert("投稿が完了し、クラウドに共有されました！");
     document.getElementById('modal-overlay').classList.remove('open');
-    // 入力フォームリセット
     document.getElementById('f-city').value = '';
     document.getElementById('f-loc').value = '';
   } catch (e) {
-    alert("送信に失敗しました: " + e);
+    console.error("データ追加エラー: ", e);
+    alert("【送信失敗】データベースへの書き込みが拒否されました。\nFirestoreの『ルール（Rules）』がテストモード（allow read, write: if true;）になっているか確認してください。\n原因: " + e.message);
   }
 }
 
