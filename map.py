@@ -1,7 +1,8 @@
 import streamlit as st
 import folium
 from folium.plugins import Geocoder  
-import base64
+import streamlit.components.v1 as components
+import os
 
 # 画面を横いっぱいに広げる設定
 st.set_page_config(layout="wide")
@@ -64,7 +65,14 @@ custom_smartphone_script = """
                 } catch(e) { alert("エラー: " + e.message); }
             }
         }, function(error) {
-            alert("❌ GPS取得失敗: " + error.message);
+            // エラーコードの詳細を表示して原因を特定しやすくする
+            var errMsg = "";
+            switch(error.code) {
+                case error.PERMISSION_DENIED: errMsg = "位置情報の利用が許可されていません。"; break;
+                case error.POSITION_UNAVAILABLE: errMsg = "位置情報が利用できません（電波状況など）。"; break;
+                case error.TIMEOUT: errMsg = "タイムアウトしました。"; break;
+            }
+            alert("❌ GPS取得失敗: " + errMsg + " (" + error.message + ")");
         }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
     }
     window.onload = function() { setTimeout(getLocation, 1500); };
@@ -76,17 +84,20 @@ akita_map.get_root().header.add_child(folium.Element(custom_smartphone_script))
 st.title("🗺️ 秋田 現在地GPSマップ")
 
 # ========================================================
-# 🔥【究極の突破策】HTMLをBase64化して、生のiframeで描画
+# 🔥【究極の解決策】Streamlitの静的アセットディレクトリを利用
 # ========================================================
-# 1. 地図をHTML文字列としてレンダリング
-map_html = akita_map.get_root().render()
+# Streamlitのライブラリが配置されている「静的ファイル置き場」の絶対パスを取得
+import streamlit
+st_static_path = os.path.join(os.path.dirname(streamlit.__file__), "static")
 
-# 2. 文字列をBase64に変換（ブラウザのセキュリティ制限を回避するため）
-b64_html = base64.b64encode(map_html.encode('utf-8')).decode('utf-8')
-data_url = f"data:text/html;base64,{b64_html}"
+# 地図HTMLをその静的フォルダ内に直接保存（これにより、アプリ本体と同じドメインから配信される）
+map_filename = "my_actual_gps_map.html"
+map_full_path = os.path.join(st_static_path, map_filename)
+akita_map.save(map_full_path)
 
-# 3. st.markdown を使い、allow="geolocation" を持った「本物のiframe」を直接生成
+# 2. 本体と同じオリジン（相対パス）として iframe を埋め込む（allow="geolocation" を指定）
+# これにより、Safariの「data:URLに対するGPS禁止制限」を完全に回避できます。
 st.markdown(
-    f'<iframe src="{data_url}" width="100%" height="700" style="border:none;" allow="geolocation"></iframe>',
+    f'<iframe src="./{map_filename}" width="100%" height="700" style="border:none;" allow="geolocation"></iframe>',
     unsafe_allow_html=True
 )
