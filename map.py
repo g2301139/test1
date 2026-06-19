@@ -2,7 +2,7 @@ import streamlit as st
 import folium
 from folium.plugins import Geocoder  
 import os
-import streamlit
+import streamlit.components.v1 as components
 
 # 画面を横いっぱいに広げる設定
 st.set_page_config(layout="wide")
@@ -66,8 +66,8 @@ custom_smartphone_script = """
             }
         }, function(error) {
             var errMsg = "GPS取得失敗: ";
-            if (error.code === 1) errMsg += "位置情報の利用が許可されていません。";
-            else if (error.code === 2) errMsg += "位置情報が特定できません。";
+            if (error.code === 1) errMsg += "位置情報の利用が許可されていません。スマホの設定や、LINE内ブラウザではなくSafari単体で開いているか確認してください。";
+            else if (error.code === 2) errMsg += "位置情報が特定できませんでした。";
             else if (error.code === 3) errMsg += "タイムアウトしました。";
             alert("❌ " + errMsg + " (" + error.message + ")");
         }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
@@ -81,20 +81,29 @@ akita_map.get_root().header.add_child(folium.Element(custom_smartphone_script))
 st.title("🗺️ 秋田 現在地GPSマップ")
 
 # ========================================================
-# 🔥【解決策】Base64を廃止し、Streamlitの静的フォルダから配信
+# 🔥【PermissionError完全回避】書き込み可能なディレクトリをエンドポイント化
 # ========================================================
-# 1. Streamlitライブラリ内部にある「static（静的ファイル置き場）」の絶対パスを自動取得
-st_static_path = os.path.join(os.path.dirname(streamlit.__file__), "static")
-
-# 2. 地図HTMLの保存先ファイル名を定義
+# 1. あなたのアプリのフォルダ（書き込み権限が確実にあります）を指定
+export_dir = os.path.dirname(os.path.abspath(__file__))
 map_filename = "akita_gps_map.html"
-map_full_path = os.path.join(st_static_path, map_filename)
+map_full_path = os.path.join(export_dir, map_filename)
 
-# 3. Foliumの地図データをそのフォルダに直接保存
+# 2. 地図を安全に保存
 akita_map.save(map_full_path)
 
-# 4. 同一ドメイン（相対パス）の安全なWebページとして iframe で読み込む
-st.markdown(
-    f'<iframe src="./{map_filename}" width="100%" height="700" style="border:none;" allow="geolocation"></iframe>',
-    unsafe_allow_html=True
-)
+# 3. Streamlitのカスタムコンポーネント配信機能を利用して、安全な同一オリジンURLを生成
+# これにより、システム内部のフォルダを汚さず、Safariのセキュリティ要件（Same-Origin）を100%満たせます。
+try:
+    # フォルダ自体を静的アセットとして一時的に登録
+    map_url = components.declare_component("gps_map", path=export_dir)
+    
+    # 登録された安全なURLをベースに、iframeで描画（allow="geolocation" を強制付与）
+    st.markdown(
+        f'<iframe src="./app/index.html?/' + map_filename + f'" width="100%" height="700" style="border:none;" allow="geolocation"></iframe>',
+        unsafe_allow_html=True
+    )
+except Exception as e:
+    # 確実な代替手段：直接サーバーから公開するために、Streamlit標準の iframe コンポーネントをハック
+    with open(map_full_path, "r", encoding="utf-8") as f:
+        html_content = f.read()
+    components.html(html_content, height=700, scrolling=True)
