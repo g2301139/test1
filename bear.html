@@ -236,8 +236,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebas
 import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 // ========================================================
-// ⚠️ 【★ここを必ず書き換えてください★】
-//     ここにあなたのFirebaseのウェブアプリ用キーを貼り付けます。
+// ⚠️ 【重要：ここだけあなたのFirebaseキーを貼り付けてください】
 // ========================================================
 const firebaseConfig = {
   apiKey: "YOUR_API_KEY",
@@ -330,7 +329,7 @@ function loadOpenMeteoForecast() {
       } else if (CSV_DATA.length > 0) {
         alertBar.style.background = "linear-gradient(135deg, #c2410c 0%, #ea580c 100%)";
         document.getElementById('alert-title').textContent = "🟡 クマ危険度【中・リアルタイム目撃あり】";
-        document.getElementById('weather-advice-text').textContent = "🐾 近隣で目撃報告があります。朝夕や雨の日の行動は十分注意してください。";
+        document.getElementById('weather-advice-text').textContent = "🐾 近鄰で目撃報告があります。朝夕や雨の日の行動は十分注意してください。";
         document.getElementById('dynamic-alert-text').textContent = "最新の投稿内容が自動反映されています。";
       } else {
         alertBar.style.background = "linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%)";
@@ -433,7 +432,7 @@ async function submitPost() {
     document.getElementById('f-loc').value = '';
   } catch (e) {
     console.error("書き込みエラー: ", e);
-    alert("【エラー】保存できませんでした。\nキーがサンプル（YOUR_API_KEY）のままか、Firebaseのルールで書き込みが禁止されている可能性があります。");
+    alert("【エラー】保存できませんでした。");
   }
 }
 
