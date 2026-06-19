@@ -2,7 +2,6 @@ import streamlit as st
 import folium
 from folium.plugins import Geocoder  
 import os
-import streamlit.components.v1 as components
 
 # 画面を横いっぱいに広げる設定
 st.set_page_config(layout="wide")
@@ -66,8 +65,8 @@ custom_smartphone_script = """
             }
         }, function(error) {
             var errMsg = "GPS取得失敗: ";
-            if (error.code === 1) errMsg += "位置情報の利用が許可されていません。スマホの設定や、LINE内ブラウザではなくSafari単体で開いているか確認してください。";
-            else if (error.code === 2) errMsg += "位置情報が特定できませんでした。";
+            if (error.code === 1) errMsg += "位置情報の利用が許可されていません。";
+            else if (error.code === 2) errMsg += "位置情報が特定できません。";
             else if (error.code === 3) errMsg += "タイムアウトしました。";
             alert("❌ " + errMsg + " (" + error.message + ")");
         }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
@@ -81,29 +80,23 @@ akita_map.get_root().header.add_child(folium.Element(custom_smartphone_script))
 st.title("🗺️ 秋田 現在地GPSマップ")
 
 # ========================================================
-# 🔥【PermissionError完全回避】書き込み可能なディレクトリをエンドポイント化
+# 🔥【公式推奨アプローチ】書き込み可能なカスタムstatic機能を利用
 # ========================================================
-# 1. あなたのアプリのフォルダ（書き込み権限が確実にあります）を指定
-export_dir = os.path.dirname(os.path.abspath(__file__))
-map_filename = "akita_gps_map.html"
-map_full_path = os.path.join(export_dir, map_filename)
+# 1. 自身のプロジェクト内に「static」というフォルダを自動作成する（書き込み権限あり）
+static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+if not os.path.exists(static_dir):
+    os.makedirs(static_dir)
 
-# 2. 地図を安全に保存
+map_filename = "akita_gps_map.html"
+map_full_path = os.path.join(static_dir, map_filename)
+
+# 2. 地図HTMLを安全に保存
 akita_map.save(map_full_path)
 
-# 3. Streamlitのカスタムコンポーネント配信機能を利用して、安全な同一オリジンURLを生成
-# これにより、システム内部のフォルダを汚さず、Safariのセキュリティ要件（Same-Origin）を100%満たせます。
-try:
-    # フォルダ自体を静的アセットとして一時的に登録
-    map_url = components.declare_component("gps_map", path=export_dir)
-    
-    # 登録された安全なURLをベースに、iframeで描画（allow="geolocation" を強制付与）
-    st.markdown(
-        f'<iframe src="./app/index.html?/' + map_filename + f'" width="100%" height="700" style="border:none;" allow="geolocation"></iframe>',
-        unsafe_allow_html=True
-    )
-except Exception as e:
-    # 確実な代替手段：直接サーバーから公開するために、Streamlit標準の iframe コンポーネントをハック
-    with open(map_full_path, "r", encoding="utf-8") as f:
-        html_content = f.read()
-    components.html(html_content, height=700, scrolling=True)
+# 3. Streamlitに「static」フォルダ内のファイルを同一ドメインの静的ファイルとして公開させる設定
+# StreamlitではアプリURLの末尾に「/app/static/ファイル名」で直接アクセスできます。
+# これによりSafariは安全な同一オリジンとみなし、かつ地図が消える不具合も起きません。
+st.markdown(
+    f'<iframe src="./app/static/{map_filename}" width="100%" height="700" style="border:none;" allow="geolocation"></iframe>',
+    unsafe_allow_html=True
+)
