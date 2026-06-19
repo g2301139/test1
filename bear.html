@@ -236,8 +236,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebas
 import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 // ========================================================
-// ⚠️ 【重要】Firebase管理画面から取得したご自身のキーを貼り付けてください
-//     YOUR_API_KEYなどのままだと通信エラーになります。
+// ⚠️ 【★最重要★】Firebaseの設定コードをここに貼り付けてください
+//     サンプルのままだとデータが送信・保存されず、更新すると消えます。
 // ========================================================
 const firebaseConfig = {
   apiKey: "YOUR_API_KEY",
@@ -264,13 +264,9 @@ window.addEventListener('DOMContentLoaded', () => {
   const now = new Date();
   document.getElementById('current-date').textContent = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日`;
   
-  // 1. マップとUIの基礎設定
   initMap();
-  // 2. 雨雲データの読み込み
   fetchJmaRadarTimestamps();
-  // 3. OpenMeteo天気予報の取得
   loadOpenMeteoForecast();
-  // 4. Firebaseからリアルタイムにデータを取得して同期
   syncFirebaseData();
 });
 
@@ -294,7 +290,7 @@ function initMap() {
 }
 
 function syncFirebaseData() {
-  // リアルタイム監視と同時に、接続エラーを画面上にアラート表示するよう修正
+  // エラーハンドリングを追加：通信・ルール拒否が発生した際、ダイアログで通知します
   onSnapshot(collection(db, "bear_reports"), (snapshot) => {
     CSV_DATA = [];
     snapshot.forEach((doc) => {
@@ -305,8 +301,8 @@ function syncFirebaseData() {
     render();
     loadOpenMeteoForecast(); 
   }, (error) => {
-    console.error("Firebaseの同期に失敗しました: ", error);
-    alert("【通信エラー】Firebaseからデータを読み込めません。\nFirebaseコンソールで『Firestore Database』が作成されているか、また『ルール』が許可（true）になっているか確認してください。\n詳細: " + error.message);
+    console.error("Firebaseの読み込みエラー: ", error);
+    alert("【同期エラー】データベースからデータを取得できません。\n原因: " + error.message + "\n\n※Firebaseの『Firestore Database』が有効化されているか、またルール（Rules）で読み込みが許可されているか確認してください。");
   });
 }
 
@@ -345,7 +341,6 @@ function loadOpenMeteoForecast() {
         document.getElementById('dynamic-alert-text').textContent = "現在のところ新しい目撃報告はありません。";
       }
 
-      // 3時間タイムライン
       const timeline = document.getElementById('weather-timeline');
       let tHtml = '';
       for(let i=0; i<8; i++) {
@@ -357,7 +352,7 @@ function loadOpenMeteoForecast() {
       }
       timeline.innerHTML = tHtml;
     })
-    .catch(err => console.error("天気予報の取得に失敗しました: ", err));
+    .catch(err => console.error("天気情報の取得に失敗しました:", err));
 }
 
 function render() {
@@ -399,7 +394,7 @@ function render() {
         try {
           await deleteDoc(doc(db, "bear_reports", d.id));
         } catch (error) {
-          alert("削除に失敗しました。権限がありません: " + error.message);
+          alert("削除に失敗しました。詳細: " + error.message);
         }
       }
     };
@@ -434,113 +429,35 @@ async function submitPost() {
   };
 
   try {
-    // 確実にデータ追加完了を待機するよう修正
+    // 確実にデータ追加の完了を同期待機（await）します
     await addDoc(collection(db, "bear_reports"), newReport);
-    alert("投稿が完了し、クラウドに共有されました！");
+    alert("投稿が正常にクラウドデータベースへ共有されました！");
     document.getElementById('modal-overlay').classList.remove('open');
     document.getElementById('f-city').value = '';
     document.getElementById('f-loc').value = '';
   } catch (e) {
-    console.error("データ追加エラー: ", e);
-    alert("【送信失敗】データベースへの書き込みが拒否されました。\nFirestoreの『ルール（Rules）』がテストモード（allow read, write: if true;）になっているか確認してください。\n原因: " + e.message);
+    console.error("書き込みエラー: ", e);
+    alert("【送信失敗】クラウドデータベースへの保存が拒否されました。\n\n【原因】\n" + e.message + "\n\n【解決策】\nFirebaseコンソールの『Firestore Database』の『ルール（Rules）』タブを開き、外部からの読み書きが許可（allow read, write: if true; などのテストモード）されているか確認してください。");
   }
 }
 
-// ========================================================
-// 🌧️ 雨雲レーダーの時間を取得する処理（最大15時間先まで対応版）
-// ========================================================
-async function fetchJmaRadarTimestamps() {
-  try {
-    const ts = Date.now();
-    // 気象庁の公式タイムスタンプ（時刻表）を直接取得します
-    const [resNowc, resPrca] = await Promise.all([
-      fetch(`https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}`),
-      fetch(`https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N2.json?_=${ts}`)
-    ]);
-    const dataNowc = await resNowc.json();
-    const dataPrca = await resPrca.json();
-
-    let times = [];
-    
-    // ① 最新の「降水ナウキャスト」（過去〜1時間後までの5分刻み）
-    const latestNowcBase = dataNowc.reduce((max, t) => t.basetime > max ? t.basetime : max, "");
-    dataNowc.forEach(t => {
-      if (t.basetime === latestNowcBase) {
-        t.prod = "nowc"; t.element = "hrpns";
-        times.push(t);
-      }
-    });
-
-    // ② 最新の「今後の雨」（1時間後〜15時間後まで）
-    const lastNowcValid = times.length > 0 ? times[times.length - 1].validtime : "0";
-    const latestPrcaBase = dataPrca.reduce((max, t) => t.basetime > max ? t.basetime : max, "");
-    dataPrca.forEach(t => {
-      // ナウキャストの最終時間よりも未来のデータだけを追加
-      if (t.basetime === latestPrcaBase && t.validtime > lastNowcValid) {
-        t.prod = "prca"; t.element = "prca";
-        times.push(t);
-      }
-    });
-
-    js_urls = [];
-    js_labels = [];
-    let currentIndex = 0;
-
-    // 取得した時間リストをもとに、URLとラベルを作成
-    times.forEach((t) => {
-      js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/${t.prod}/${t.basetime}/none/${t.validtime}/surf/${t.element}/{z}/{x}/{y}.png`);
-      
-      // 時間文字列（YYYYMMDDHHmmss）から日本時間への変換
-      const validDate = new Date(Date.UTC(
-        t.validtime.substring(0,4), t.validtime.substring(4,6) - 1, t.validtime.substring(6,8),
-        t.validtime.substring(8,10), t.validtime.substring(10,12)
-      ));
-      const baseDate = new Date(Date.UTC(
-        t.basetime.substring(0,4), t.basetime.substring(4,6) - 1, t.basetime.substring(6,8),
-        t.basetime.substring(8,10), t.basetime.substring(10,12)
-      ));
-      
-      const timeStr = `${String(validDate.getHours()).padStart(2,'0')}:${String(validDate.getMinutes()).padStart(2,'0')}`;
-      const diffMins = Math.floor((validDate - baseDate) / 60000);
-
-      // 表示用ラベルの判定
-      if (diffMins === 0) {
-        js_labels.push(`現在 (${timeStr})`);
-        currentIndex = js_urls.length; 
-      } else if (diffMins < 0) {
-        const absDiff = Math.abs(diffMins);
-        if (absDiff >= 60) js_labels.push(`${Math.floor(absDiff/60)}時間前 (${timeStr})`);
-        else js_labels.push(`${absDiff}分前 (${timeStr})`);
-      } else if (diffMins < 60) {
-        js_labels.push(`${diffMins}分後 (${timeStr})`);
-      } else {
-        const hDiff = Math.floor(diffMins/60);
-        const mDiff = diffMins % 60;
-        if (mDiff === 0) js_labels.push(`${hDiff}時間後 (${timeStr})`);
-        else js_labels.push(`${hDiff}時間${mDiff}分後 (${timeStr})`);
-      }
-    });
-
-    currentIndex = Math.max(0, currentIndex - 1); 
-
-    // スライダーが長くなりすぎるのを防ぐため、過去分は「-1時間」から表示する
-    const startIndex = Math.max(0, currentIndex - 12);
-    js_urls = js_urls.slice(startIndex);
-    js_labels = js_labels.slice(startIndex);
-    currentIndex = currentIndex - startIndex;
-
-    // スライダーの更新
-    const slider = document.getElementById('radar-time-slider');
-    slider.max = js_urls.length - 1;
-    slider.value = currentIndex;
-    document.getElementById('time-label').textContent = js_labels[currentIndex];
-
-    // もしすでにレーダーを表示している状態なら即座に反映
-    if (isRadarActive) updateRadarLayer();
-
-  } catch (e) {
-    console.error("雨雲データの取得に失敗しました", e);
+function fetchJmaRadarTimestamps() {
+  const currentTs = Date.now();
+  const baseUtc = new Date(Math.floor(currentTs / 300000) * 300000 - 9 * 3600000);
+  js_urls = []; js_labels = [];
+  for (let i = -2; i <= 6; i++) {
+    const targetDt = new Date(baseUtc.getTime() + i * 5 * 60000);
+    const y = targetDt.getUTCFullYear(); const m = String(targetDt.getUTCMonth() + 1).padStart(2, '0'); const d = String(targetDt.getUTCDate()).padStart(2, '0'); const h = String(targetDt.getUTCHours()).padStart(2, '0'); const min = String(targetDt.getUTCMinutes()).padStart(2, '0');
+    const basetime = `${y}${m}${d}${h}${min}00`;
+    const prod = i <= 0 ? "nowc" : "prca"; const element = i <= 0 ? "hrpns" : "prca";
+    js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/${prod}/${basetime}/none/${basetime}/surf/${element}/{z}/{x}/{y}.png`);
+    const localTime = new Date(targetDt.getTime() + 9 * 3600000);
+    const timeStr = `${String(localTime.getHours()).padStart(2,'0')}:${String(localTime.getMinutes()).padStart(2,'0')}`;
+    if (i === 0) js_labels.push(`現在 (${timeStr})`); else if (i < 0) js_labels.push(`${Math.abs(i)*5}分前 (${timeStr})`); else js_labels.push(`${i*5}分後 (${timeStr})`);
   }
+  const slider = document.getElementById('radar-time-slider');
+  slider.max = js_urls.length - 1; slider.value = 2;
+  document.getElementById('time-label').textContent = js_labels[2];
 }
 
 function updateRadarLayer() {
