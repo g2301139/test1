@@ -30,7 +30,7 @@ html, body {
   background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
   color: #fff; padding: 15px 20px; display: flex; gap: 15px; align-items: center;
   flex-shrink: 0; box-shadow: inset 0 -3px 6px rgba(0,0,0,0.15);
-  transition: background 0.5s ease;
+  transition: background 0.3s ease;
 }
 .w-card {
   display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.2);
@@ -73,14 +73,15 @@ html, body {
 
 .filter-box { padding: 12px; border-bottom: 1px solid #e2e8f0; background: #fff; }
 #type-filters { display: flex; gap: 6px; }
-.fbtn { flex: 1; padding: 6px; border: 1px solid #cbd5e1; background: #fff; border-radius: 4px; font-size: 12px; cursor: pointer; text-align: center; font-weight: bold; }
+.fbtn { flex: 1; padding: 8px 6px; border: 1px solid #cbd5e1; background: #fff; border-radius: 6px; font-size: 12px; cursor: pointer; text-align: center; font-weight: bold; }
 .fbtn.on { background: #1e293b; color: #fff; border-color: #1e293b; }
 .fbtn.on-orange { background: #ea580c; color: #fff; border-color: #ea580c; }
+.fbtn.on-red { background: #dc2626; color: #fff; border-color: #dc2626; }
 
 .list-hdr { padding: 8px 12px; background: #f1f5f9; font-size: 12px; font-weight: bold; color: #64748b; }
 .list-scroll { flex: 1; overflow-y: auto; background: #fff; }
 
-/* 取り消しボタン付きリストアイテム */
+/* リストアイテム */
 .sitem { padding: 12px; border-bottom: 1px solid #f1f5f9; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
 .sitem:hover { background: #f8fafc; }
 .sitem-content { flex: 1; }
@@ -89,11 +90,6 @@ html, body {
 .type-tag { display: inline-block; font-size: 10px; padding: 2px 6px; border-radius: 3px; font-weight: bold; color: #fff; margin-top: 4px; }
 .tag-熊の目撃 { background: #64748b; }
 .tag-熊の人身被害 { background: #dc2626; }
-.btn-delete { background: #ef4444; color: white; border: none; padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; font-weight: bold; margin-left: 8px; }
-.btn-delete:hover { background: #b91c1c; }
-
-.action-panel { padding: 12px; background: #fff; border-top: 1px solid #e2e8f0; }
-.btn-primary { width: 100%; padding: 10px; background: #16a34a; color: #fff; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 13px; }
 
 /* 🗺️ マップエリア */
 #map { flex: 1; height: 100%; width: 100%; background: #e5e9f0; position: relative; }
@@ -111,14 +107,6 @@ html, body {
 .slider-label { font-size: 12px; font-weight: bold; text-align: center; color: #0f172a; }
 .time-display { color: #dc2626; font-weight: bold; }
 .range-slider { width: 100%; cursor: pointer; margin-top: 4px; }
-
-/* 投稿モーダル */
-.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 3000; padding: 20px; }
-.modal-overlay.open { display: flex; }
-.modal-window { background: #fff; border-radius: 8px; width: 100%; max-width: 500px; display: flex; flex-direction: column; overflow: hidden; padding: 16px; gap: 12px; }
-.form-grp { display: flex; flex-direction: column; gap: 4px; }
-.form-grp label { font-size: 12px; font-weight: bold; color: #475569; }
-.form-grp input, .form-grp select { padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; }
 
 #loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #fff; z-index: 9999; display: flex; align-items: center; justify-content: center; font-weight: bold; }
 
@@ -173,18 +161,14 @@ html, body {
           
           <div class="filter-box">
             <div id="type-filters">
-              <div class="fbtn on" data-t="all">すべて</div>
-              <div class="fbtn" data-t="目撃">目撃・痕跡</div>
-              <div class="fbtn" data-t="人身被害">人身被害</div>
+              <div class="fbtn on" data-t="all">🔵 すべての状況</div>
+              <div class="fbtn" data-t="目撃">🟡 目撃・痕跡</div>
+              <div class="fbtn" data-t="人身被害">🔴 人身被害</div>
             </div>
           </div>
           
           <div class="list-hdr" id="list-count">0件の情報</div>
           <div class="list-scroll" id="sightings-list"></div>
-          
-          <div class="action-panel">
-            <button class="btn-primary" id="open-modal">🐻 クマ出没情報を共有する</button>
-          </div>
         </div>
       </div>
       
@@ -203,40 +187,15 @@ html, body {
   </div>
 </div>
 
-<div class="modal-overlay" id="modal-overlay">
-  <div class="modal-window">
-    <h3 style="margin:0;">🐾 クマ出没情報の投稿</h3>
-    <div class="form-grp">
-      <label>情報種別</label>
-      <select id="f-type">
-        <option value="熊の目撃">熊の目撃・痕跡</option>
-        <option value="熊の人身被害">熊の人身被害（重大事態）</option>
-      </select>
-    </div>
-    <div class="form-grp">
-      <label>市町村</label>
-      <input type="text" id="f-city" placeholder="例：秋田市">
-    </div>
-    <div class="form-grp">
-      <label>詳しい場所・地番</label>
-      <input type="text" id="f-loc" placeholder="例：〇〇千秋公園付近の林道">
-    </div>
-    <div style="display:flex; justify-content:end; gap:10px; margin-top:10px;">
-      <button id="cancel-btn" style="padding:8px 16px; background:#e2e8f0; border:none; border-radius:4px; cursor:pointer;">キャンセル</button>
-      <button id="submit-btn" style="padding:8px 20px; background:#16a34a; color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">送信して全員に共有</button>
-    </div>
-  </div>
-</div>
-
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { getFirestore, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 // ========================================================
-// ⚠️ 【重要：ここだけあなたのFirebaseキーを貼り付けてください】
+// ⚠️ 【お使いのFirebaseキーをここに貼り付けてください】
 // ========================================================
 const firebaseConfig = {
   apiKey: "YOUR_API_KEY",
@@ -247,7 +206,6 @@ const firebaseConfig = {
   appId: "YOUR_APP_ID"
 };
 
-// 初期化
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
@@ -258,6 +216,7 @@ let js_urls = [];
 let js_labels = [];
 let isRadarActive = false;
 let isBearActive = true;
+let lastWeatherCache = null; // 天気テキストの一時保存用
 
 window.addEventListener('DOMContentLoaded', () => {
   const now = new Date();
@@ -297,7 +256,7 @@ function syncFirebaseData() {
       CSV_DATA.push(data);
     });
     render();
-    loadOpenMeteoForecast(); 
+    updateAlertBanner(); // データ更新時にバナーも更新
   }, (error) => {
     console.error("Firebaseの読み込みエラー: ", error);
   });
@@ -318,25 +277,9 @@ function loadOpenMeteoForecast() {
 
       document.getElementById('weather-icon').textContent = wIcon;
       document.getElementById('weather-text').textContent = `秋田市: ${wText}`;
+      lastWeatherCache = wIcon;
 
-      const hasDanger = CSV_DATA.some(d => d["情報種別"] === "熊の人身被害");
-      const alertBar = document.getElementById('alert-bar');
-      if (hasDanger) {
-        alertBar.style.background = "linear-gradient(135deg, #7f1d1d 0%, #dc2626 100%)";
-        document.getElementById('alert-title').textContent = "🔴 🚨 クマ危険度【極めて高い・人身被害報告あり】";
-        document.getElementById('weather-advice-text').textContent = "⚠️【緊急警告】人身被害情報がクラウドに同期されました。対象エリアへの不要不急の立ち入りは絶対に避けてください！";
-        document.getElementById('dynamic-alert-text').textContent = "毎日の天気チェックと同時に、下の出没マップを確認してください。";
-      } else if (CSV_DATA.length > 0) {
-        alertBar.style.background = "linear-gradient(135deg, #c2410c 0%, #ea580c 100%)";
-        document.getElementById('alert-title').textContent = "🟡 クマ危険度【中・リアルタイム目撃あり】";
-        document.getElementById('weather-advice-text').textContent = "🐾 近鄰で目撃報告があります。朝夕や雨の日の行動は十分注意してください。";
-        document.getElementById('dynamic-alert-text').textContent = "最新の投稿内容が自動反映されています。";
-      } else {
-        alertBar.style.background = "linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%)";
-        document.getElementById('alert-title').textContent = "🟢 クマ危険度【低】（現在データなし）";
-        document.getElementById('weather-advice-text').textContent = "周囲の状況に注意し、見通しの悪い場所に入る際は音の出るものを携帯してください。";
-        document.getElementById('dynamic-alert-text').textContent = "現在のところ新しい目撃報告はありません。";
-      }
+      updateAlertBanner();
 
       const timeline = document.getElementById('weather-timeline');
       let tHtml = '';
@@ -350,6 +293,47 @@ function loadOpenMeteoForecast() {
       timeline.innerHTML = tHtml;
     })
     .catch(err => console.error("天気情報の取得に失敗しました:", err));
+}
+
+// 🚨 【機能追加】色ボタンを押した際に、それぞれの危険度レベルを示す処理
+function updateAlertBanner() {
+  const alertBar = document.getElementById('alert-bar');
+  const titleEl = document.getElementById('alert-title');
+  const descEl = document.getElementById('dynamic-alert-text');
+  const adviceEl = document.getElementById('weather-advice-text');
+
+  if (currentFilterType === '人身被害') {
+    // 🔴 赤ボタン：人身被害レベル
+    alertBar.style.background = "linear-gradient(135deg, #7f1d1d 0%, #dc2626 100%)";
+    titleEl.textContent = "🔴 【極めて危険】クマ人身被害発生エリア";
+    descEl.textContent = "過去、または直近で人身被害が報告された最危険区域です。命に関わる重大な事態が生じています。";
+    adviceEl.textContent = "⚠️【警戒レベル極大】該当の市町村・山林・農地への立ち入りは絶対に行わないでください。周囲での単独行動は極めて危険です。";
+
+  } else if (currentFilterType === '目撃') {
+    // 🟡 オレンジボタン：目撃・痕跡レベル
+    alertBar.style.background = "linear-gradient(135deg, #c2410c 0%, #ea580c 100%)";
+    titleEl.textContent = "🟡 【注意】クマの目撃・痕跡（足跡・食痕）情報あり";
+    descEl.textContent = "付近でクマ本体の目撃、あるいは新しい足跡やフンなどの痕跡が発見されています。";
+    adviceEl.textContent = "🐾【警戒レベル中】クマが近くに潜んでいる可能性があります。朝夕の行動を避け、鈴やラジオなど音の出るものを必ず携帯してください。";
+
+  } else {
+    // 🔵 青ボタン：総合・通常表示（実際のデータ状況を判定）
+    const hasDanger = CSV_DATA.some(d => d["情報種別"] === "熊の人身被害");
+    if (hasDanger) {
+      alertBar.style.background = "linear-gradient(135deg, #7f1d1d 0%, #dc2626 100%)";
+      titleEl.textContent = "🔴 🚨 クマ危険度【極めて高い・人身被害報告あり】";
+      descEl.textContent = "県内で深刻な人身被害が報告されています。マップ上の赤いピンの場所に近づかないでください。";
+    } else if (CSV_DATA.length > 0) {
+      alertBar.style.background = "linear-gradient(135deg, #c2410c 0%, #ea580c 100%)";
+      titleEl.textContent = "🟡 クマ危険度【中・リアルタイム目撃あり】";
+      descEl.textContent = "最新の目撃報告がデータベースに同期されています。周囲の安全を確認してください。";
+    } else {
+      alertBar.style.background = "linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%)";
+      titleEl.textContent = "🟢 クマ危険度【低】（現在新しいデータはありません）";
+      descEl.textContent = "現在のところ最新の目撃・被害報告はありません。日々の気象情報をあわせて確認しましょう。";
+    }
+    adviceEl.textContent = "周囲の状況に常に注意し、見通しの悪い茂みや林道に入る際は音を出して自分の存在を知らせてください。";
+  }
 }
 
 function render() {
@@ -381,69 +365,14 @@ function render() {
         <span class="type-tag tag-${type}">${type}</span>
       </div>
     `;
-    
-    const delBtn = document.createElement('button');
-    delBtn.className = 'btn-delete';
-    delBtn.textContent = '❌ 取り消し';
-    delBtn.onclick = async (e) => {
-      e.stopPropagation();
-      if(confirm("この投稿を取り消しますか？")) {
-        try {
-          await deleteDoc(doc(db, "bear_reports", d.id));
-        } catch (error) {
-          alert("削除に失敗しました: " + error.message);
-        }
-      }
-    };
-    item.appendChild(delBtn);
     listEl.appendChild(item);
   });
   document.getElementById('list-count').textContent = `${count} 件の情報`;
 }
 
-async function submitPost() {
-  const type = document.getElementById('f-type').value;
-  const city = document.getElementById('f-city').value;
-  const loc = document.getElementById('f-loc').value;
-  
-  if(!city || !loc) { alert("市町村と詳しい場所を入力してください。"); return; }
-
-  let targetLat = map.getCenter().lat;
-  let targetLng = map.getCenter().lng;
-  if(userMarker) { targetLat = userMarker.getLatLng().lat; targetLng = userMarker.getLatLng().lng; }
-
-  const now = new Date();
-  const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:00`;
-
-  const newReport = {
-    "情報種別": type,
-    "市町村": city,
-    "地番情報": loc,
-    "発生日時": dateStr,
-    "緯度": targetLat,
-    "経度": targetLng
-  };
-
-  try {
-    await addDoc(collection(db, "bear_reports"), newReport);
-    alert("投稿が完了しました！");
-    document.getElementById('modal-overlay').classList.remove('open');
-    document.getElementById('f-city').value = '';
-    document.getElementById('f-loc').value = '';
-  } catch (e) {
-    console.error("書き込みエラー: ", e);
-    alert("【エラー】保存できませんでした。");
-  }
-}
-
-// ========================================================
-// 🌧️ 雨雲レーダーの時間を取得する処理（15時間先まで対応版）
-// ========================================================
 async function fetchJmaRadarTimestamps() {
   try {
     const ts = Date.now();
-    
-    // ナウキャスト(直近〜1時間)と降水短時間予報(1時間〜15時間)のデータを一気に取得
     const urls = [
       `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}`,
       `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_=${ts}`,
@@ -460,11 +389,10 @@ async function fetchJmaRadarTimestamps() {
       const res = responses[i];
       if (!res || !res.ok) continue;
       const data = await res.json();
-      const prod = i < 3 ? "nowc" : "prca"; // 前半3つはnowc、後半3つはprca
+      const prod = i < 3 ? "nowc" : "prca";
 
       data.forEach(t => {
         if (t.basetime && t.validtime) {
-          // 同じ時間のデータが重複した場合は、新しい発表時刻のものを優先
           if (!allTimes[t.validtime] || t.basetime > allTimes[t.validtime].basetime) {
             t.prod = prod;
             t.element = t.elements ? t.elements[0] : (prod === "nowc" ? "hrpns" : "prca");
@@ -474,7 +402,6 @@ async function fetchJmaRadarTimestamps() {
       });
     }
 
-    // 取得した時間を古い順に並び替え
     const sortedTimes = Object.values(allTimes).sort((a, b) => a.validtime.localeCompare(b.validtime));
 
     js_urls = [];
@@ -482,7 +409,6 @@ async function fetchJmaRadarTimestamps() {
     let currentIndex = 0;
     const now = new Date();
 
-    // URLとスライダー用のラベルを作成
     sortedTimes.forEach((t) => {
       js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/${t.prod}/${t.basetime}/none/${t.validtime}/surf/${t.element}/{z}/{x}/{y}.png`);
       
@@ -511,7 +437,6 @@ async function fetchJmaRadarTimestamps() {
       }
     });
 
-    // スライダーの目盛りを更新
     const slider = document.getElementById('radar-time-slider');
     slider.max = js_urls.length - 1;
     slider.value = currentIndex;
@@ -525,7 +450,6 @@ async function fetchJmaRadarTimestamps() {
   }
 }
 
-// 🌐 予備システム：エラー時に最低限のレーダーを復旧させる関数
 function fallbackRadar() {
   const currentTs = Date.now();
   const baseUtc = new Date(Math.floor(currentTs / 300000) * 300000 - 9 * 3600000);
@@ -549,7 +473,6 @@ function updateRadarLayer() {
   const slider = document.getElementById('radar-time-slider');
   if (radarLayer) map.removeLayer(radarLayer);
   
-  // 拡大しても雨雲が消えないように maxNativeZoom: 10 を追加
   radarLayer = L.tileLayer(js_urls[slider.value], { 
     opacity: 0.65, 
     zIndex: 1500,
@@ -567,10 +490,22 @@ function initEvents() {
   document.getElementById('radar-time-slider').oninput = function() { document.getElementById('time-label').textContent = js_labels[this.value]; if (isRadarActive) updateRadarLayer(); };
   document.getElementById('btn-bear-toggle').onclick = function() { isBearActive = !isBearActive; if (isBearActive) { this.style.background = '#1e293b'; this.textContent = '🐻 熊マーカーを隠す'; map.addLayer(markers); } else { this.style.background = '#64748b'; this.textContent = '🐻 熊マーカーを表示'; map.removeLayer(markers); } };
   document.getElementById('btn-gps').onclick = () => { if (navigator.geolocation) { navigator.geolocation.getCurrentPosition(pos => { const lat = pos.coords.latitude; const lng = pos.coords.longitude; map.flyTo([lat, lng], 13); if (userMarker) map.removeLayer(userMarker); userMarker = L.circleMarker([lat, lng], { radius: 8, fillColor: '#2563eb', color: '#fff', weight: 2 }).addTo(map).bindPopup("現在地").openPopup(); }); } };
-  document.querySelectorAll('#type-filters .fbtn').forEach(btn => { btn.onclick = function() { document.querySelectorAll('#type-filters .fbtn').forEach(b => b.className = 'fbtn'); currentFilterType = this.getAttribute('data-t'); this.classList.add(currentFilterType === 'all' ? 'on' : (currentFilterType.includes('人身') ? 'on-orange' : 'on')); render(); }; });
-  document.getElementById('open-modal').onclick = () => document.getElementById('modal-overlay').classList.add('open');
-  document.getElementById('cancel-btn').onclick = () => document.getElementById('modal-overlay').classList.remove('open');
-  document.getElementById('submit-btn').onclick = submitPost;
+  
+  // 🎨 色ボタンのイベント処理（クリックされたボタンに応じてバナー危険度を変動）
+  document.querySelectorAll('#type-filters .fbtn').forEach(btn => { 
+    btn.onclick = function() { 
+      document.querySelectorAll('#type-filters .fbtn').forEach(b => b.className = 'fbtn'); 
+      currentFilterType = this.getAttribute('data-t'); 
+      
+      // ボタン自体の色のアクティブ化
+      if (currentFilterType === 'all') this.classList.add('on');
+      else if (currentFilterType === '目撃') this.classList.add('on-orange');
+      else if (currentFilterType === '人身被害') this.classList.add('on-red');
+      
+      render(); 
+      updateAlertBanner(); // 危険度表示を即時更新！
+    }; 
+  });
 }
 </script>
 </body>
