@@ -499,59 +499,64 @@ function updateRadarLayer() {
   }).addTo(map);
 }
 
-// 🚨 【不協和音サイレン警報システム】
-// 単一のピコピコした電子音を完全に払拭。
-// 2つのオシレーターをわずかにずらした周波数（和音の不協和音・うねり効果）で同時に鳴らし、
-// さらに背後に常時「ザー」という微量のノイズを混ぜることで、防災無線や本物のサイレンのようなザラついた威嚇・警告音を生成します。
-function playBearAlarm() {
+// 🚨 【セキュリティ強化：自動再生ブロック解除対応サイレン】
+async function playBearAlarm(event) {
+  // 地図のクリック伝播を殺す前に、まずはブラウザの「タップイベントのコンテキスト権利」を最優先で奪取・アクティブ化する
+  if (event && typeof event.stopPropagation === 'function') {
+    event.stopPropagation();
+  }
+
   try {
-    var audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    var now = audioCtx.currentTime;
-    var duration = 10.0; // 緊迫感のあるサイレンをたっぷり10秒間鳴らします
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    const audioCtx = new AudioContextClass();
+    
+    // 🔒 もしブロック（suspended）されていたら、このユーザーアクションの瞬間に無理やり起こす
+    if (audioCtx.state === 'suspended') {
+      await audioCtx.resume();
+    }
+    
+    const now = audioCtx.currentTime;
+    const duration = 10.0; // 緊迫感のあるサイレンをたっぷり10秒間鳴らします
     
     // 全体を統括するマスターボリューム
-    var masterGain = audioCtx.createGain();
-MasterGain.gain.setValueAtTime(0.0, now);
-    masterGain.gain.linearRampToValueAtTime(1.5, now + 0.1); // 立ち上がりを素早く
+    const masterGain = audioCtx.createGain();
+    masterGain.gain.setValueAtTime(0.0, now);
+    masterGain.gain.linearRampToValueAtTime(1.5, now + 0.1); 
     masterGain.gain.setValueAtTime(1.5, now + duration - 0.5);
-    masterGain.gain.linearRampToValueAtTime(0.0, now + duration); // 最後に綺麗にフェードアウト
+    masterGain.gain.linearRampToValueAtTime(0.0, now + duration); 
     
     // --- サイレン音源1（ベースとなるうねり） ---
-    var osc1 = audioCtx.createOscillator();
-    osc1.type = 'sawtooth'; // エッジの効いたノコギリ波
+    const osc1 = audioCtx.createOscillator();
+    osc1.type = 'sawtooth'; 
     
     // --- サイレン音源2（不協和音を生み出すための、わずかにずらした2部合唱） ---
-    var osc2 = audioCtx.createOscillator();
-    osc2.type = 'triangle'; // 角を少し丸めた三角波をブレンドして音に厚みを出す
+    const osc2 = audioCtx.createOscillator();
+    osc2.type = 'triangle'; 
     
-    // 10秒間、周期的に「ウーーーーン、ウーーーーン」と周波数を上下させる（サイレンの動き）
-    // Jアラートや避難警報をサンプリングしたような 650Hz 〜 950Hz の緊迫ゾーンを往復
-    for (var t = 0; t < duration; t += 0.05) {
-      // 1.5秒周期で上下するサインカーブ
-      var lfo = Math.sin(t * (Math.PI * 2 / 1.5)); 
-      var baseFreq = 800 + (lfo * 150); // 650Hz〜950Hz
+    // 10秒間、周期的に「ウーーーーン」と周波数を上下させる
+    for (let t = 0; t < duration; t += 0.05) {
+      const lfo = Math.sin(t * (Math.PI * 2 / 1.5)); 
+      const baseFreq = 800 + (lfo * 150); 
       
       osc1.frequency.setValueAtTime(baseFreq, now + t);
-      // あえて「4Hz」だけズラすことで、スマホのスピーカーが物理的に激しく振動する「うねり現象」を強制発生させる
-      osc2.frequency.setValueAtTime(baseFreq + 4, now + t);
+      osc2.frequency.setValueAtTime(baseFreq + 4, now + t); // 4Hzズラして物理的な「うねり」を発生
     }
     
-    // --- サイレン特有の「スピーカーのハウリング・空気の歪み」を再現する微量ノイズ層 ---
-    var bufferSize = audioCtx.sampleRate * duration;
-    var buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-    var data = buffer.getChannelData(0);
-    for (var i = 0; i < bufferSize; i++) {
+    // --- スピーカーの空気の歪みを再現する微量ノイズ層 ---
+    const bufferSize = audioCtx.sampleRate * duration;
+    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
       data[i] = Math.random() * 2 - 1;
     }
-    var noise = audioCtx.createBufferSource();
+    const noise = audioCtx.createBufferSource();
     noise.buffer = buffer;
     
-    var noiseGain = audioCtx.createGain();
-    noiseGain.gain.setValueAtTime(0.08, now); // サイレンを邪魔しない、でも電子音感を消す絶妙なガサガサ感
+    const noiseGain = audioCtx.createGain();
+    noiseGain.gain.setValueAtTime(0.08, now); 
     
-    // 各パーツをマスターに集結
-    var osc1Gain = audioCtx.createGain(); osc1Gain.gain.setValueAtTime(0.6, now);
-    var osc2Gain = audioCtx.createGain(); osc2Gain.gain.setValueAtTime(0.5, now);
+    const osc1Gain = audioCtx.createGain(); osc1Gain.gain.setValueAtTime(0.6, now);
+    const osc2Gain = audioCtx.createGain(); osc2Gain.gain.setValueAtTime(0.5, now);
     
     osc1.connect(osc1Gain); osc1Gain.connect(masterGain);
     osc2.connect(osc2Gain); osc2Gain.connect(masterGain);
@@ -559,7 +564,6 @@ MasterGain.gain.setValueAtTime(0.0, now);
     
     masterGain.connect(audioCtx.destination);
     
-    // 全音源一斉起動
     osc1.start(now);
     osc2.start(now);
     noise.start(now);
@@ -569,13 +573,15 @@ MasterGain.gain.setValueAtTime(0.0, now);
     noise.stop(now + duration);
 
   } catch(e) {
-    alert("ブラウザが音声発信をブロックしました。画面を一度タップしてから再度お試しください。");
+    console.error("Audio Playback Error:", e);
+    alert("音声発信が制限されました。もう一度ボタンをしっかりとタップしてください。");
   }
 }
 
 function initEvents() {
-  document.getElementById('btn-alarm').onclick = playBearAlarm;
-  document.getElementById('btn-floating-alarm').onclick = playBearAlarm;
+  // イベントハンドラに直接 event オブジェクトを渡し、タップ直後に処理を割り込ませる
+  document.getElementById('btn-alarm').addEventListener('click', (e) => playBearAlarm(e));
+  document.getElementById('btn-floating-alarm').addEventListener('click', (e) => playBearAlarm(e));
 
   document.getElementById('btn-radar-toggle').onclick = function() {
     isRadarActive = !isRadarActive;
