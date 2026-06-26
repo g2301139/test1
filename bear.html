@@ -392,7 +392,8 @@ async function fetchJmaRadarTimestamps() {
       `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N3.json?_=${ts}`,
       `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N1.json?_=${ts}`,
       `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N2.json?_=${ts}`,
-      `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N3.json?_=${ts}`
+      `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N3.json?_=${ts}`,
+      `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N4.json?_=${ts}` // 15時間先まで取得
     ];
 
     const responses = await Promise.all(urls.map(url => fetch(url).catch(() => null)));
@@ -420,6 +421,7 @@ async function fetchJmaRadarTimestamps() {
     js_urls = [];
     js_labels = [];
     let currentIndex = 0;
+    let minDiff = Infinity; // 🕒 修正: 一番近い時間を探すための変数
     const now = new Date();
 
     sortedTimes.forEach((t) => {
@@ -433,9 +435,14 @@ async function fetchJmaRadarTimestamps() {
       const timeStr = `${String(validDate.getHours()).padStart(2,'0')}:${String(validDate.getMinutes()).padStart(2,'0')}`;
       const diffMins = Math.round((validDate - now) / 60000);
 
-      if (diffMins > -5 && diffMins <= 5) {
-        js_labels.push(`現在 (${timeStr})`);
+      // 🕒 修正: 配信ラグがあっても、現在時刻に一番近いものを「現在」としてセットする
+      if (Math.abs(diffMins) < minDiff) {
+        minDiff = Math.abs(diffMins);
         currentIndex = js_urls.length - 1; 
+      }
+
+      if (diffMins > -10 && diffMins <= 10) {
+        js_labels.push(`現在 (${timeStr})`);
       } else if (diffMins < 0) {
         const absDiff = Math.abs(diffMins);
         if (absDiff >= 60) js_labels.push(`${Math.floor(absDiff/60)}時間前 (${timeStr})`);
@@ -462,7 +469,6 @@ async function fetchJmaRadarTimestamps() {
     fallbackRadar();
   }
 }
-
 function fallbackRadar() {
   const currentTs = Date.now();
   const baseUtc = new Date(Math.floor(currentTs / 300000) * 300000 - 9 * 3600000);
@@ -486,13 +492,19 @@ function updateRadarLayer() {
   const slider = document.getElementById('radar-time-slider');
   if (radarLayer) map.removeLayer(radarLayer);
   
-  radarLayer = L.tileLayer(js_urls[slider.value], { 
+  const url = js_urls[slider.value];
+  if (!url) return;
+
+  // 💡 15時間予報（prca）はズームレベル6までしか存在しないため、上限を変更
+  const isPrca = url.includes('/prca/');
+  const maxZ = isPrca ? 6 : 10;
+
+  radarLayer = L.tileLayer(url, { 
     opacity: 0.65, 
     zIndex: 1500,
-    maxNativeZoom: 10 
+    maxNativeZoom: maxZ 
   }).addTo(map);
 }
-
 // 🚨 【音質改変】本能的な恐怖を煽る、100Hz前後の凶悪な地響き低音＆ヘビー震動
 function playBearAlarm() {
   try {
