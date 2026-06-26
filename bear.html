@@ -54,7 +54,6 @@ def win_notification_safe(title, message):
 def fetch_weather_and_warnings():
     info = {"weather": "データなし", "warning": "警報なし", "raw_weather": ""}
     try:
-        # 050000 = 秋田県（必要に応じて地域コードを変更してください）
         url_w = "https://www.jma.go.jp/bosai/forecast/data/forecast/050000.json"
         res = requests.get(url_w, timeout=5)
         data = res.json()
@@ -89,7 +88,7 @@ def background_weather_monitor():
         current_w = info["raw_weather"]
         
         if current_w and current_w != last_weather_status:
-            if last_weather_status != "":  # 初回起動時は通知をスキップ
+            if last_weather_status != "":
                 if "雨" in current_w or "雪" in current_w:
                     win_notification_safe(
                         "🌧️ 天気急変の可能性 🌧️", 
@@ -129,17 +128,22 @@ def start_mesugaki_shooting(parent_win):
     boss_normal_img = None
     boss_awakened_img = None
 
-    # 画像ロード処理
     if os.path.exists(m_img_path):
-        try: mesugaki_img = ImageTk.PhotoImage(Image.open(m_img_path).resize((80, 80), Image.Resampling.LANCZOS), master=game_win)
-        except Exception as e: print("自機画像エラー:", e)
+        try:
+            mesugaki_img = ImageTk.PhotoImage(Image.open(m_img_path).resize((80, 80), Image.Resampling.LANCZOS), master=game_win)
+        except Exception as e:
+            print("自機画像エラー:", e)
 
     if os.path.exists(o_img_path):
-        try: ojisan_images.append(ImageTk.PhotoImage(Image.open(o_img_path).resize((50, 90), Image.Resampling.LANCZOS), master=game_win))
-        except Exception as e: print("敵画像1エラー:", e)
+        try:
+            ojisan_images.append(ImageTk.PhotoImage(Image.open(o_img_path).resize((50, 90), Image.Resampling.LANCZOS), master=game_win))
+        except Exception as e:
+            print("敵画像1エラー:", e)
     if os.path.exists(o2_img_path):
-        try: ojisan_images.append(ImageTk.PhotoImage(Image.open(o2_img_path).resize((80, 90), Image.Resampling.LANCZOS), master=game_win))
-        except Exception as e: print("敵画像2エラー:", e)
+        try:
+            ojisan_images.append(ImageTk.PhotoImage(Image.open(o2_img_path).resize((80, 90), Image.Resampling.LANCZOS), master=game_win))
+        except Exception as e:
+            print("敵画像2エラー:", e)
 
     boss_paths = ["くまお_2.jpg", "くまお.jpg", "くまお.png"]
     for path in boss_paths:
@@ -147,7 +151,8 @@ def start_mesugaki_shooting(parent_win):
             try:
                 boss_normal_img = ImageTk.PhotoImage(Image.open(path).resize((180, 200), Image.Resampling.LANCZOS), master=game_win)
                 break
-            except: pass
+            except:
+                pass
 
     if os.path.exists("くまお覚醒.jpg"):
         try:
@@ -155,7 +160,6 @@ def start_mesugaki_shooting(parent_win):
         except Exception as e:
             print("覚醒画像読み込みエラー:", e)
 
-    # ゲーム内ステート
     m_x, m_y = 400, 520
     m_hp, m_max_hp = 100, 100
     game_state = "ZAKO"
@@ -171,7 +175,6 @@ def start_mesugaki_shooting(parent_win):
 
     enemies, m_bullets, b_bullets, effects = [], [], [], []
 
-    # 自機の生成（画像がない場合は円を描画）
     if mesugaki_img:
         m_char = canvas.create_image(m_x, m_y, image=mesugaki_img)
     else:
@@ -188,7 +191,8 @@ def start_mesugaki_shooting(parent_win):
     b_hp_bar = canvas.create_rectangle(200, 45, 600, 60, fill="#ff5555", outline="", state="hidden")
 
     def spawn_ojisan():
-        if game_state != "ZAKO" or kill_count >= required_kills: return
+        if game_state != "ZAKO" or kill_count >= required_kills:
+            return
         x, y = random.randint(150, 650), random.randint(120, 240)
         if ojisan_images:
             char = canvas.create_image(x, y, image=random.choice(ojisan_images))
@@ -200,23 +204,32 @@ def start_mesugaki_shooting(parent_win):
             "speed": random.uniform(0.04, 0.08), "move_speed": random.choice([-3, 3])
         })
 
-    for _ in range(3): spawn_ojisan()
+    for _ in range(3):
+        spawn_ojisan()
+        
     hit_words = ["HIT!", "撃破!", "GOOD!"]
 
     def move_left(e):
         nonlocal m_x
         if m_x > 50 and m_hp > 0: 
             m_x -= 30
-            canvas.coords(m_char, m_x, m_y) if mesugaki_img else canvas.coords(m_char, m_x-20, m_y-20, m_x+20, m_y+20)
+            if mesugaki_img:
+                canvas.coords(m_char, m_x, m_y)
+            else:
+                canvas.coords(m_char, m_x-20, m_y-20, m_x+20, m_y+20)
             
     def move_right(e):
         nonlocal m_x
         if m_x < 750 and m_hp > 0: 
             m_x += 30
-            canvas.coords(m_char, m_x, m_y) if mesugaki_img else canvas.coords(m_char, m_x-20, m_y-20, m_x+20, m_y+20)
+            if mesugaki_img:
+                canvas.coords(m_char, m_x, m_y)
+            else:
+                canvas.coords(m_char, m_x-20, m_y-20, m_x+20, m_y+20)
 
     def fire_bullet(e):
-        if m_hp <= 0 or game_state in ["SPAWN_BOSS", "CLEAR", "GAMEOVER"]: return
+        if m_hp <= 0 or game_state in ["SPAWN_BOSS", "CLEAR", "GAMEOVER"]:
+            return
         b = canvas.create_oval(m_x-5, m_y-45, m_x+5, m_y-30, fill="#ff79c6", outline="")
         m_bullets.append(b)
 
@@ -231,14 +244,17 @@ def start_mesugaki_shooting(parent_win):
 
     def update_game():
         nonlocal game_state, kill_count, boss_x, boss_y, boss_dir, boss_hp, m_hp, boss_char, boss_angle, attack_tick, spiral_angle, has_transformed
-        if not game_win.winfo_exists(): return
-        if game_state in ["GAMEOVER", "CLEAR"]: return
+        if not game_win.winfo_exists():
+            return
+        if game_state in ["GAMEOVER", "CLEAR"]:
+            return
 
         if game_state == "ZAKO":
             for env in enemies:
                 env["angle"] += env["speed"]
                 env["cx"] += env["move_speed"]
-                if env["cx"] <= 80 or env["cx"] >= 720: env["move_speed"] *= -1
+                if env["cx"] <= 80 or env["cx"] >= 720:
+                    env["move_speed"] *= -1
                 
                 ex = env["cx"] + math.cos(env["angle"]) * env["radius"]
                 ey = env["cy"] + math.sin(env["angle"]) * env["radius"]
@@ -247,11 +263,14 @@ def start_mesugaki_shooting(parent_win):
                 else:
                     canvas.coords(env["id"], ex-25, ey-45, ex+25, ey+45)
                     
-            if len(enemies) < 3 and kill_count + len(enemies) < required_kills: spawn_ojisan()
-            if kill_count >= required_kills: game_state = "SPAWN_BOSS"
+            if len(enemies) < 3 and kill_count + len(enemies) < required_kills:
+                spawn_ojisan()
+            if kill_count >= required_kills:
+                game_state = "SPAWN_BOSS"
 
         elif game_state == "SPAWN_BOSS":
-            for env in enemies: canvas.delete(env["id"])
+            for env in enemies:
+                canvas.delete(env["id"])
             enemies.clear()
             if boss_normal_img is not None:
                 boss_char = canvas.create_image(boss_x, boss_y, image=boss_normal_img)
@@ -266,14 +285,12 @@ def start_mesugaki_shooting(parent_win):
 
         elif game_state == "BOSS" and boss_char is not None:
             boss_x += boss_dir
-            if boss_x <= 150 or boss_x >= 650: boss_dir *= -1
+            if boss_x <= 150 or boss_x >= 650:
+                boss_dir *= -1
             boss_angle += 0.06
             actual_y = boss_y + math.sin(boss_angle) * 25
             
-            if boss_normal_img is not None or (has_transformed and boss_awakened_img is not None):
-                canvas.coords(boss_char, boss_x, actual_y)
-            else:
-                canvas.coords(boss_char, boss_x, actual_y)
+            canvas.coords(boss_char, boss_x, actual_y)
             
             attack_tick += 1
             hp_ratio = boss_hp / boss_max_hp
@@ -315,12 +332,13 @@ def start_mesugaki_shooting(parent_win):
                         bb = canvas.create_oval(bx-5, by-5, bx+5, by+5, fill="#ffff55", outline="#ff5555")
                         b_bullets.append({"id": bb, "vx": math.cos(angle) * 7, "vy": math.sin(angle) * 7 + 2.5})
 
-        # 自機弾移動と当たり判定
         survived_m_bullets = []
         for b in m_bullets:
             canvas.move(b, 0, -18)
             coords = canvas.coords(b)
-            if not coords or coords[1] < 0: canvas.delete(b); continue
+            if not coords or coords[1] < 0:
+                canvas.delete(b)
+                continue
             bx, by = (coords[0] + coords[2])/2, (coords[1] + coords[3])/2
             hit = False
 
@@ -328,50 +346,61 @@ def start_mesugaki_shooting(parent_win):
                 for env in enemies:
                     try:
                         ecoords = canvas.coords(env["id"])
-                        if len(ecoords) == 2:  # 画像の場合
+                        if len(ecoords) == 2:
                             ex, ey = ecoords[0], ecoords[1]
-                        else:  # 図形の場合
+                        else:
                             ex, ey = (ecoords[0]+ecoords[2])/2, (ecoords[1]+ecoords[3])/2
-                    except: continue
+                    except:
+                        continue
                     
                     if (ex - 40 < bx < ex + 40) and (ey - 50 < by < ey + 50):
-                        canvas.delete(b); canvas.delete(env["id"]); enemies.remove(env)
+                        canvas.delete(b)
+                        canvas.delete(env["id"])
+                        enemies.remove(env)
                         kill_count += 1
                         canvas.itemconfig(score_txt, text=f"討伐数: {kill_count} / {required_kills}")
                         txt = canvas.create_text(ex, ey + 40, text=random.choice(hit_words), fill="#50fa7b", font=("MS Gothic", 12, "bold"))
                         effects.append((txt, time.time()))
-                        hit = True; break
+                        hit = True
+                        break
             elif game_state == "BOSS" and boss_char is not None:
                 if (boss_x - 95 < bx < boss_x + 95) and (boss_y - 105 < by < boss_y + 105):
-                    canvas.delete(b); boss_hp -= 5; hit = True
+                    canvas.delete(b)
+                    boss_hp -= 5
+                    hit = True
                     canvas.coords(b_hp_bar, 200, 45, 200 + int(400 * (max(0, boss_hp) / boss_max_hp)), 60)
                     if boss_hp <= 0:
-                        canvas.delete(boss_char); game_state = "CLEAR"
+                        canvas.delete(boss_char)
+                        game_state = "CLEAR"
                         canvas.create_text(400, 300, text="✨ STAGE CLEAR ✨\n\nステージをクリアしました。", fill="#50fa7b", font=("MS Gothic", 16, "bold"), justify="center")
                         return
 
-            if not hit: survived_m_bullets.append(b)
+            if not hit:
+                survived_m_bullets.append(b)
         m_bullets[:] = survived_m_bullets
 
-        # 敵弾移動と当たり判定
         survived_b_bullets = []
         for bdata in b_bullets:
             bb = bdata["id"]
             canvas.move(bb, bdata["vx"], bdata["vy"])
             coords = canvas.coords(bb)
             if not coords or coords[1] > 600 or coords[0] < 0 or coords[0] > 800:
-                canvas.delete(bb); continue
+                canvas.delete(bb)
+                continue
             bbx, bby = (coords[0] + coords[2])/2, (coords[1] + coords[3])/2
             b_hit = False
 
             if (m_x - 35 < bbx < m_x + 35) and (m_y - 45 < bby < m_y + 45):
-                canvas.delete(bb); m_hp -= 10; b_hit = True
+                canvas.delete(bb)
+                m_hp -= 10
+                b_hit = True
                 canvas.coords(m_hp_bar, 120, 565, 120 + int(200 * (max(0, m_hp) / m_max_hp)), 585)
                 if m_hp <= 0:
                     game_state = "GAMEOVER"
                     canvas.create_text(400, 300, text="☠️ GAME OVER ☠️\n\nゲームオーバーです。", fill="#ff5555", font=("MS Gothic", 16, "bold"), justify="center")
                     return
-            if not b_hit: survived_b_bullets.append(bdata)
+            if not b_hit:
+                survived_b_bullets.append(bdata)
         b_bullets[:] = survived_b_bullets
 
         effects[:] = [(fx, t) for fx, t in effects if (canvas.delete(fx) if time.time() - t > 0.6 else True)]
