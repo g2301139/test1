@@ -386,61 +386,105 @@ function render() {
 async function fetchJmaRadarTimestamps() {
   try {
     const ts = Date.now();
-    const urls = [
-      `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}`,
-      `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_=${ts}`,
-      `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N3.json?_=${ts}`,
-      `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N1.json?_=${ts}`,
-      `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N2.json?_=${ts}`,
-      `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N3.json?_=${ts}`
+    // 💡 あらゆるパターンのURLを総当たりでチェック
+    const targetApis = [
+      { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}` },
+      { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_=${ts}` },
+      { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N3.json?_=${ts}` },
+      // 15時間予報の可能性のあるパス
+      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N1.json?_=${ts}` },
+      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N2.json?_=${ts}` },
+      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes.json?_=${ts}` },
+      { prod: "fhrpns", element: "fhrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes_N1.json?_=${ts}` },
+      { prod: "fhrpns", element: "fhrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes.json?_=${ts}` }
     ];
 
-    const responses = await Promise.all(urls.map(url => fetch(url).catch(() => null)));
+    const responses = await Promise.all(targetApis.map(t => fetch(t.url).catch(() => null)));
     let allTimes = {};
 
     for (let i = 0; i < responses.length; i++) {
       const res = responses[i];
       if (!res || !res.ok) continue;
+      
       const data = await res.json();
-      const prod = i < 3 ? "nowc" : "prca";
+      if (!Array.isArray(data)) continue; // 配列じゃない場合はスキップ
+
+      const prod = targetApis[i].prod;
+      const defaultElement = targetApis[i].element;
 
       data.forEach(t => {
         if (t.basetime && t.validtime) {
           if (!allTimes[t.validtime] || t.basetime > allTimes[t.validtime].basetime) {
             t.prod = prod;
-            t.element = t.elements ? t.elements[0] : (prod === "nowc" ? "hrpns" : "prca");
+            t.element = t.elements ? t.elements[0] : defaultElement;
             allTimes[t.validtime] = t;
           }
         }
       });
     }
 
-    const sortedTimes = Object.values(allTimes).sort((a, b) => a.validtime.localeCompare(b.validtime));
+    let sortedTimes = Object.values(allTimes).sort((a, b) => a.validtime.localeCompare(b.validtime));
+    const now = new Date();
+
+    // 🚀【新機能】15時間予報のリストが取得できなかった場合の自動生成フォールバック
+    if (sortedTimes.length > 0) {
+      const lastT = sortedTimes[sortedTimes.length - 1];
+      const lastDateUtc = new Date(Date.UTC(
+        parseInt(lastT.validtime.substring(0,4)), parseInt(lastT.validtime.substring(4,6))-1,
+        parseInt(lastT.validtime.substring(6,8)), parseInt(lastT.validtime.substring(8,10)),
+        parseInt(lastT.validtime.substring(10,12))
+      ));
+      
+      // もし取得できたデータが2時間先未満（つまり57分後などで止まっている）の場合、残り時間を自動生成
+      if ((lastDateUtc - now) / 60000 < 120) {
+        const nowUtc = new Date(Date.now());
+        const bY = nowUtc.getUTCFullYear();
+        const bM = String(nowUtc.getUTCMonth()+1).padStart(2,'0');
+        const bD = String(nowUtc.getUTCDate()).padStart(2,'0');
+        const bH = String(nowUtc.getUTCHours()).padStart(2,'0');
+        const baseStr = `${bY}${bM}${bD}${bH}0000`; // 発表時刻を現在時刻のジャストの時間に設定
+        
+        let vDate = new Date(Date.UTC(bY, nowUtc.getUTCMonth(), nowUtc.getUTCDate(), nowUtc.getUTCHours(), 0, 0));
+        
+        for (let h = 1; h <= 15; h++) {
+          vDate.setUTCHours(vDate.getUTCHours() + 1);
+          const vY = vDate.getUTCFullYear();
+          const vM = String(vDate.getUTCMonth()+1).padStart(2,'0');
+          const vD = String(vDate.getUTCDate()).padStart(2,'0');
+          const vH = String(vDate.getUTCHours()).padStart(2,'0');
+          const validStr = `${vY}${vM}${vD}${vH}0000`;
+          
+          if (!sortedTimes.find(t => t.validtime === validStr)) {
+            sortedTimes.push({ basetime: baseStr, validtime: validStr, prod: "prca", element: "prca" });
+          }
+        }
+        // 再度ソートする
+        sortedTimes.sort((a, b) => a.validtime.localeCompare(b.validtime));
+      }
+    }
 
     js_urls = [];
     js_labels = [];
-    let currentIndex = 0;
-    const now = new Date();
 
     sortedTimes.forEach((t) => {
+      const year = parseInt(t.validtime.substring(0,4));
+      const month = parseInt(t.validtime.substring(4,6)) - 1;
+      const day = parseInt(t.validtime.substring(6,8));
+      const hour = parseInt(t.validtime.substring(8,10));
+      const min = parseInt(t.validtime.substring(10,12));
+      
+      const validDateUtc = new Date(Date.UTC(year, month, day, hour, min));
+      const validDateJst = new Date(validDateUtc.getTime());
+      const diffMins = Math.round((validDateJst - now) / 60000);
+
+      if (diffMins < -15) return;
+
+      const timeStr = `${String(validDateJst.getHours()).padStart(2,'0')}:${String(validDateJst.getMinutes()).padStart(2,'0')}`;
       js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/${t.prod}/${t.basetime}/none/${t.validtime}/surf/${t.element}/{z}/{x}/{y}.png`);
       
-      const validDate = new Date(Date.UTC(
-        t.validtime.substring(0,4), t.validtime.substring(4,6) - 1, t.validtime.substring(6,8),
-        t.validtime.substring(8,10), t.validtime.substring(10,12)
-      ));
-      
-      const timeStr = `${String(validDate.getHours()).padStart(2,'0')}:${String(validDate.getMinutes()).padStart(2,'0')}`;
-      const diffMins = Math.round((validDate - now) / 60000);
-
-      if (diffMins > -5 && diffMins <= 5) {
+      if (diffMins <= 5 && diffMins >= -15) {
         js_labels.push(`現在 (${timeStr})`);
-        currentIndex = js_urls.length - 1; 
-      } else if (diffMins < 0) {
-        const absDiff = Math.abs(diffMins);
-        if (absDiff >= 60) js_labels.push(`${Math.floor(absDiff/60)}時間前 (${timeStr})`);
-        else js_labels.push(`${absDiff}分前 (${timeStr})`);
-      } else if (diffMins < 60) {
+      } else if (diffMins > 5 && diffMins < 60) {
         js_labels.push(`${diffMins}分後 (${timeStr})`);
       } else {
         const hDiff = Math.floor(diffMins/60);
@@ -451,18 +495,18 @@ async function fetchJmaRadarTimestamps() {
     });
 
     const slider = document.getElementById('radar-time-slider');
-    slider.max = js_urls.length - 1;
-    slider.value = currentIndex;
-    document.getElementById('time-label').textContent = js_labels[currentIndex];
-
-    if (isRadarActive) updateRadarLayer();
+    if (slider && js_urls.length > 0) {
+      slider.max = js_urls.length - 1;
+      slider.value = 0;
+      document.getElementById('time-label').textContent = js_labels[0];
+      
+      if (typeof isRadarActive !== 'undefined' && isRadarActive) updateRadarLayer();
+    }
 
   } catch (e) {
     console.error("雨雲データの取得に失敗しました。", e);
-    fallbackRadar();
   }
 }
-
 function fallbackRadar() {
   const currentTs = Date.now();
   const baseUtc = new Date(Math.floor(currentTs / 300000) * 300000 - 9 * 3600000);
