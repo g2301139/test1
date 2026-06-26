@@ -190,7 +190,7 @@ html, body {
       
       <div id="map">
         <div class="map-control-overlay" id="map-ui">
-          <button class="map-ctrl-btn" id="btn-alarm">🚨 地響き重低音アラート</button>
+          <button class="map-ctrl-btn" id="btn-alarm">🚨 突発破裂爆音アラート</button>
           <button class="map-ctrl-btn" id="btn-radar-toggle">🌧️ 雨雲レーダーを表示</button>
           <button class="map-ctrl-btn" id="btn-bear-toggle" style="background: #1e293b;">🐻 熊マーカーを隠す</button>
           <button class="map-ctrl-btn" id="btn-gps">📍 現在地を取得</button>
@@ -200,7 +200,7 @@ html, body {
           </div>
         </div>
 
-        <button class="floating-bell-btn" id="btn-floating-alarm" title="緊急地響きアラート">🔔</button>
+        <button class="floating-bell-btn" id="btn-floating-alarm" title="緊急突発アラート">🔔</button>
       </div>
     </div>
   </div>
@@ -386,15 +386,13 @@ function render() {
 async function fetchJmaRadarTimestamps() {
   try {
     const ts = Date.now();
-    // 💡 nowc（ナウキャスト: 1時間後まで）と prca（降水予報: 15時間後まで）のURL
     const urls = [
       `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}`,
       `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_=${ts}`,
       `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N3.json?_=${ts}`,
       `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N1.json?_=${ts}`,
       `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N2.json?_=${ts}`,
-      `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N3.json?_=${ts}`,
-      `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N4.json?_=${ts}`
+      `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N3.json?_=${ts}`
     ];
 
     const responses = await Promise.all(urls.map(url => fetch(url).catch(() => null)));
@@ -408,7 +406,6 @@ async function fetchJmaRadarTimestamps() {
 
       data.forEach(t => {
         if (t.basetime && t.validtime) {
-          // 💡 すでに同じ validtime がある場合、より新しい basetime（新しい予測）を優先する
           if (!allTimes[t.validtime] || t.basetime > allTimes[t.validtime].basetime) {
             t.prod = prod;
             t.element = t.elements ? t.elements[0] : (prod === "nowc" ? "hrpns" : "prca");
@@ -418,82 +415,54 @@ async function fetchJmaRadarTimestamps() {
       });
     }
 
-    // 時間の昇順（過去から未来）にソート
     const sortedTimes = Object.values(allTimes).sort((a, b) => a.validtime.localeCompare(b.validtime));
 
     js_urls = [];
     js_labels = [];
     let currentIndex = 0;
-    let minDiff = Infinity;
-    
-    // 🕒 【重要】日本時間(JST)の現在時刻を基準にするための処理
     const now = new Date();
 
     sortedTimes.forEach((t) => {
       js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/${t.prod}/${t.basetime}/none/${t.validtime}/surf/${t.element}/{z}/{x}/{y}.png`);
       
-      // 気象庁のvalidtime文字列（例: "20260626012000"）をUTCとして正しく解析
-      const year = parseInt(t.validtime.substring(0,4));
-      const month = parseInt(t.validtime.substring(4,6)) - 1;
-      const day = parseInt(t.validtime.substring(6,8));
-      const hour = parseInt(t.validtime.substring(8,10));
-      const min = parseInt(t.validtime.substring(10,12));
+      const validDate = new Date(Date.UTC(
+        t.validtime.substring(0,4), t.validtime.substring(4,6) - 1, t.validtime.substring(6,8),
+        t.validtime.substring(8,10), t.validtime.substring(10,12)
+      ));
       
-      // 気象庁データはUTC（協定世界時）なので、Date.UTCでオブジェクトを作成
-      const validDateUtc = new Date(Date.UTC(year, month, day, hour, min));
-      
-      // 表示用に日本時間(JST)に変換（UTC+9時間）
-      const validDateJst = new Date(validDateUtc.getTime());
-      
-      const timeStr = `${String(validDateJst.getHours()).padStart(2,'0')}:${String(validDateJst.getMinutes()).padStart(2,'0')}`;
-      
-      // 現在時刻（ローカル）との差分を「分」で計算
-      const diffMins = Math.round((validDateJst - now) / 60000);
+      const timeStr = `${String(validDate.getHours()).padStart(2,'0')}:${String(validDate.getMinutes()).padStart(2,'0')}`;
+      const diffMins = Math.round((validDate - now) / 60000);
 
-      // 🕒 最も現在時刻に近いインデックスを探す（初期位置の決定）
-      if (Math.abs(diffMins) < minDiff) {
-        minDiff = Math.abs(diffMins);
-        currentIndex = js_urls.length - 1;
-      }
-
-      // ラベル文字列の生成
-      if (Math.abs(diffMins) <= 5) {
+      if (diffMins > -5 && diffMins <= 5) {
         js_labels.push(`現在 (${timeStr})`);
+        currentIndex = js_urls.length - 1; 
       } else if (diffMins < 0) {
         const absDiff = Math.abs(diffMins);
-        if (absDiff >= 60) {
-          js_labels.push(`${Math.floor(absDiff/60)}時間前 (${timeStr})`);
-        } else {
-          js_labels.push(`${absDiff}分前 (${timeStr})`);
-        }
+        if (absDiff >= 60) js_labels.push(`${Math.floor(absDiff/60)}時間前 (${timeStr})`);
+        else js_labels.push(`${absDiff}分前 (${timeStr})`);
+      } else if (diffMins < 60) {
+        js_labels.push(`${diffMins}分後 (${timeStr})`);
       } else {
-        if (diffMins >= 60) {
-          const hDiff = Math.floor(diffMins/60);
-          const mDiff = diffMins % 60;
-          if (mDiff === 0) js_labels.push(`${hDiff}時間後 (${timeStr})`);
-          else js_labels.push(`${hDiff}時間${mDiff}分後 (${timeStr})`);
-        } else {
-          js_labels.push(`${diffMins}分後 (${timeStr})`);
-        }
+        const hDiff = Math.floor(diffMins/60);
+        const mDiff = diffMins % 60;
+        if (mDiff === 0) js_labels.push(`${hDiff}時間後 (${timeStr})`);
+        else js_labels.push(`${hDiff}時間${mDiff}分後 (${timeStr})`);
       }
     });
 
-    // スライダーの更新
     const slider = document.getElementById('radar-time-slider');
-    if (slider && js_urls.length > 0) {
-      slider.max = js_urls.length - 1;
-      slider.value = currentIndex;
-      document.getElementById('time-label').textContent = js_labels[currentIndex];
-      
-      if (isRadarActive) updateRadarLayer();
-    }
+    slider.max = js_urls.length - 1;
+    slider.value = currentIndex;
+    document.getElementById('time-label').textContent = js_labels[currentIndex];
+
+    if (isRadarActive) updateRadarLayer();
 
   } catch (e) {
     console.error("雨雲データの取得に失敗しました。", e);
     fallbackRadar();
   }
 }
-  
+
 function fallbackRadar() {
   const currentTs = Date.now();
   const baseUtc = new Date(Math.floor(currentTs / 300000) * 300000 - 9 * 3600000);
@@ -517,69 +486,48 @@ function updateRadarLayer() {
   const slider = document.getElementById('radar-time-slider');
   if (radarLayer) map.removeLayer(radarLayer);
   
-  const url = js_urls[slider.value];
-  if (!url) return;
-
-  // 💡 15時間予報（prca）はズームレベル6までしか存在しないため、上限を変更
-  const isPrca = url.includes('/prca/');
-  const maxZ = isPrca ? 6 : 10;
-
-  radarLayer = L.tileLayer(url, { 
+  radarLayer = L.tileLayer(js_urls[slider.value], { 
     opacity: 0.65, 
     zIndex: 1500,
-    maxNativeZoom: maxZ 
+    maxNativeZoom: 10 
   }).addTo(map);
 }
-// 🚨 【音質改変】本能的な恐怖を煽る、100Hz前後の凶悪な地響き低音＆ヘビー震動
+
+// 🚨 【音質改変】野生生物の不意を突く、爆発・銃撃系の突発的超大音量バースト
 function playBearAlarm() {
   try {
     var audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     
-    // 超低音を最も重厚に出すため、3基の発振器を絶妙にズラして重ねる（トリプル低音構造）
-    var osc1 = audioCtx.createOscillator();
-    var osc2 = audioCtx.createOscillator();
-    var osc3 = audioCtx.createOscillator();
-    var gainNode = audioCtx.createGain();
-    
-    // 地鳴りのような低い唸りを生み出すため、最も太いベースが出る「サイン波（sine）」を採用
-    osc1.type = 'sine';
-    osc2.type = 'sine';
-    osc3.type = 'sine';
-    
     var now = audioCtx.currentTime;
-    var duration = 4.5; // ボタン1回タップで4.5秒間唸り続けます
+    var totalDuration = 4.0; // 4秒間で突発音の連射攻撃を行います
     
-    // 基本の周波数を「地響き」の100Hz前後にターゲット。
-    // あえて数ヘルツずつ狂わせることで、スピーカー自体を物理的に強く震わせる「唸り・うねり」を発生
-    osc1.frequency.setValueAtTime(95, now);
-    osc2.frequency.setValueAtTime(100, now);
-    osc3.frequency.setValueAtTime(105, now);
-    
-    // ⚡【ここがキモ】音量を1秒間に15回という超高速で「最大⇔ほぼ無音」に激しく往復させる（パルス・トレモロ効果）
-    // これにより、ただの低音ではなく、獣の低い唸り声や、地面が割れるような不気味な不快感に化けます
-    for (var t = 0; t < duration; t += 0.06) {
-        gainNode.gain.setValueAtTime(1.0, now + t);
-        gainNode.gain.linearRampToValueAtTime(0.1, now + t + 0.03);
-        gainNode.gain.linearRampToValueAtTime(1.0, now + t + 0.06);
+    // 0.15秒周期で「バババババン！！」と超高速に銃撃のような破裂音を発生させる
+    for (var i = 0; i < totalDuration; i += 0.15) {
+      (function(startTime) {
+        var osc = audioCtx.createOscillator();
+        var gainNode = audioCtx.createGain();
+        
+        // 最もエッジが立ち、激しい破裂感が出る「ノコギリ波(sawtooth)」を採用
+        osc.type = 'sawtooth';
+        
+        // 衝撃を強めるため、超低音(80Hz)から不快な中音(350Hz)まで複数の倍音をランダムにブレンド
+        var randomFreq = 80 + Math.random() * 270;
+        osc.frequency.setValueAtTime(randomFreq, startTime);
+        
+        // ⚡【ここが最重要】突発音にするため、無音から一瞬（0.002秒）で音量を最大(1.2)に引き上げる
+        gainNode.gain.setValueAtTime(0.0, startTime);
+        gainNode.gain.linearRampToValueAtTime(1.2, startTime + 0.002); // 立ち上がり最速化
+        
+        // その後、0.08秒かけて急激に音を消し、鋭い「キレ」の破裂音にする
+        gainNode.gain.exponentialRampToValueAtTime(0.001, startTime + 0.08);
+        
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        
+        osc.start(startTime);
+        osc.stop(startTime + 0.09);
+      })(now + i);
     }
-    
-    // 音の終わりのフェードアウト処理
-    gainNode.gain.setValueAtTime(1.0, now + duration - 0.3);
-    gainNode.gain.linearRampToValueAtTime(0.001, now + duration);
-    
-    // スピーカーへの接続と起動
-    osc1.connect(gainNode);
-    osc2.connect(gainNode);
-    osc3.connect(gainNode);
-    gainNode.connect(audioCtx.destination);
-    
-    osc1.start(now);
-    osc2.start(now);
-    osc3.start(now);
-    
-    osc1.stop(now + duration);
-    osc2.stop(now + duration);
-    osc3.stop(now + duration);
 
   } catch(e) {
     alert("ブラウザが音声発信をブロックしました。画面を一度タップしてから再度お試しください。");
