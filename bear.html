@@ -386,6 +386,7 @@ function render() {
 async function fetchJmaRadarTimestamps() {
   try {
     const ts = Date.now();
+    // 💡 nowc（ナウキャスト: 1時間後まで）と prca（降水予報: 15時間後まで）のURL
     const urls = [
       `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}`,
       `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_=${ts}`,
@@ -393,7 +394,7 @@ async function fetchJmaRadarTimestamps() {
       `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N1.json?_=${ts}`,
       `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N2.json?_=${ts}`,
       `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N3.json?_=${ts}`,
-      `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N4.json?_=${ts}` // 15時間先まで取得
+      `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N4.json?_=${ts}`
     ];
 
     const responses = await Promise.all(urls.map(url => fetch(url).catch(() => null)));
@@ -407,6 +408,7 @@ async function fetchJmaRadarTimestamps() {
 
       data.forEach(t => {
         if (t.basetime && t.validtime) {
+          // 💡 すでに同じ validtime がある場合、より新しい basetime（新しい予測）を優先する
           if (!allTimes[t.validtime] || t.basetime > allTimes[t.validtime].basetime) {
             t.prod = prod;
             t.element = t.elements ? t.elements[0] : (prod === "nowc" ? "hrpns" : "prca");
@@ -416,59 +418,82 @@ async function fetchJmaRadarTimestamps() {
       });
     }
 
+    // 時間の昇順（過去から未来）にソート
     const sortedTimes = Object.values(allTimes).sort((a, b) => a.validtime.localeCompare(b.validtime));
 
     js_urls = [];
     js_labels = [];
     let currentIndex = 0;
-    let minDiff = Infinity; // 🕒 修正: 一番近い時間を探すための変数
+    let minDiff = Infinity;
+    
+    // 🕒 【重要】日本時間(JST)の現在時刻を基準にするための処理
     const now = new Date();
 
     sortedTimes.forEach((t) => {
       js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/${t.prod}/${t.basetime}/none/${t.validtime}/surf/${t.element}/{z}/{x}/{y}.png`);
       
-      const validDate = new Date(Date.UTC(
-        t.validtime.substring(0,4), t.validtime.substring(4,6) - 1, t.validtime.substring(6,8),
-        t.validtime.substring(8,10), t.validtime.substring(10,12)
-      ));
+      // 気象庁のvalidtime文字列（例: "20260626012000"）をUTCとして正しく解析
+      const year = parseInt(t.validtime.substring(0,4));
+      const month = parseInt(t.validtime.substring(4,6)) - 1;
+      const day = parseInt(t.validtime.substring(6,8));
+      const hour = parseInt(t.validtime.substring(8,10));
+      const min = parseInt(t.validtime.substring(10,12));
       
-      const timeStr = `${String(validDate.getHours()).padStart(2,'0')}:${String(validDate.getMinutes()).padStart(2,'0')}`;
-      const diffMins = Math.round((validDate - now) / 60000);
+      // 気象庁データはUTC（協定世界時）なので、Date.UTCでオブジェクトを作成
+      const validDateUtc = new Date(Date.UTC(year, month, day, hour, min));
+      
+      // 表示用に日本時間(JST)に変換（UTC+9時間）
+      const validDateJst = new Date(validDateUtc.getTime());
+      
+      const timeStr = `${String(validDateJst.getHours()).padStart(2,'0')}:${String(validDateJst.getMinutes()).padStart(2,'0')}`;
+      
+      // 現在時刻（ローカル）との差分を「分」で計算
+      const diffMins = Math.round((validDateJst - now) / 60000);
 
-      // 🕒 修正: 配信ラグがあっても、現在時刻に一番近いものを「現在」としてセットする
+      // 🕒 最も現在時刻に近いインデックスを探す（初期位置の決定）
       if (Math.abs(diffMins) < minDiff) {
         minDiff = Math.abs(diffMins);
-        currentIndex = js_urls.length - 1; 
+        currentIndex = js_urls.length - 1;
       }
 
-      if (diffMins > -10 && diffMins <= 10) {
+      // ラベル文字列の生成
+      if (Math.abs(diffMins) <= 5) {
         js_labels.push(`現在 (${timeStr})`);
       } else if (diffMins < 0) {
         const absDiff = Math.abs(diffMins);
-        if (absDiff >= 60) js_labels.push(`${Math.floor(absDiff/60)}時間前 (${timeStr})`);
-        else js_labels.push(`${absDiff}分前 (${timeStr})`);
-      } else if (diffMins < 60) {
-        js_labels.push(`${diffMins}分後 (${timeStr})`);
+        if (absDiff >= 60) {
+          js_labels.push(`${Math.floor(absDiff/60)}時間前 (${timeStr})`);
+        } else {
+          js_labels.push(`${absDiff}分前 (${timeStr})`);
+        }
       } else {
-        const hDiff = Math.floor(diffMins/60);
-        const mDiff = diffMins % 60;
-        if (mDiff === 0) js_labels.push(`${hDiff}時間後 (${timeStr})`);
-        else js_labels.push(`${hDiff}時間${mDiff}分後 (${timeStr})`);
+        if (diffMins >= 60) {
+          const hDiff = Math.floor(diffMins/60);
+          const mDiff = diffMins % 60;
+          if (mDiff === 0) js_labels.push(`${hDiff}時間後 (${timeStr})`);
+          else js_labels.push(`${hDiff}時間${mDiff}分後 (${timeStr})`);
+        } else {
+          js_labels.push(`${diffMins}分後 (${timeStr})`);
+        }
       }
     });
 
+    // スライダーの更新
     const slider = document.getElementById('radar-time-slider');
-    slider.max = js_urls.length - 1;
-    slider.value = currentIndex;
-    document.getElementById('time-label').textContent = js_labels[currentIndex];
-
-    if (isRadarActive) updateRadarLayer();
+    if (slider && js_urls.length > 0) {
+      slider.max = js_urls.length - 1;
+      slider.value = currentIndex;
+      document.getElementById('time-label').textContent = js_labels[currentIndex];
+      
+      if (isRadarActive) updateRadarLayer();
+    }
 
   } catch (e) {
     console.error("雨雲データの取得に失敗しました。", e);
     fallbackRadar();
   }
 }
+  
 function fallbackRadar() {
   const currentTs = Date.now();
   const baseUtc = new Date(Math.floor(currentTs / 300000) * 300000 - 9 * 3600000);
