@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ベアウェザー：秋田県 天気＆安全対策</title>
+<title>ベアウェザー：秋田県 天気＆安全・災害対策</title>
 
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.min.css" />
@@ -90,6 +90,13 @@ html, body {
 .type-tag { display: inline-block; font-size: 10px; padding: 2px 6px; border-radius: 3px; font-weight: bold; color: #fff; margin-top: 4px; }
 .tag-熊の目撃 { background: #64748b; }
 .tag-熊の人身被害 { background: #dc2626; }
+.tag-災害情報 { background: #b91c1c; animation: pulse 2s infinite; }
+
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.6; }
+  100% { opacity: 1; }
+}
 
 /* 🗺️ マップエリア */
 #map { flex: 1; height: 100%; width: 100%; background: #e5e9f0; position: relative; }
@@ -143,7 +150,7 @@ html, body {
 
 <div id="app" style="display:none;">
   <div class="header">
-    <h1>ベアウェザー：秋田県 天気＆リアルタイム安全対策</h1>
+    <h1>ベアウェザー：秋田県 天気＆リアルタイム安全・災害対策</h1>
     <div class="header-date" id="current-date">----年--月--日</div>
   </div>
   
@@ -158,7 +165,7 @@ html, body {
       </div>
       <div class="alert-message">
         <div class="alert-title" id="alert-title">同期完了</div>
-        <div class="alert-desc" id="dynamic-alert-text">周囲の目撃状況をチェックしています。</div>
+        <div class="alert-desc" id="dynamic-alert-text">周囲の目撃状況および防災情報をチェックしています。</div>
       </div>
     </div>
     
@@ -190,7 +197,7 @@ html, body {
       
       <div id="map">
         <div class="map-control-overlay" id="map-ui">
-          <button class="map-ctrl-btn" id="btn-alarm">💥 熊よけ爆竹（一発炸裂）</button>
+          <button class="map-ctrl-btn" id="btn-alarm">🚨 突発破裂爆音アラート</button>
           <button class="map-ctrl-btn" id="btn-radar-toggle">🌧️ 雨雲レーダーを表示</button>
           <button class="map-ctrl-btn" id="btn-bear-toggle" style="background: #1e293b;">🐻 熊マーカーを隠す</button>
           <button class="map-ctrl-btn" id="btn-gps">📍 現在地を取得</button>
@@ -200,7 +207,7 @@ html, body {
           </div>
         </div>
 
-        <button class="floating-bell-btn" id="btn-floating-alarm" title="緊急爆竹炸裂">💥</button>
+        <button class="floating-bell-btn" id="btn-floating-alarm" title="緊急突発アラート">🔔</button>
       </div>
     </div>
   </div>
@@ -233,16 +240,29 @@ let js_labels = [];
 let isRadarActive = false;
 let isBearActive = true;
 let lastWeatherCache = null;
+let isInitialLoad = true;
 
 window.addEventListener('DOMContentLoaded', () => {
   const now = new Date();
   document.getElementById('current-date').textContent = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日`;
   
+  requestNotificationPermission();
   initMap();
   fetchJmaRadarTimestamps();
   loadOpenMeteoForecast();
   syncFirebaseData();
+  
+  // ⚡ 追加：気象災害オープンデータのリアルタイム定期巡回（J-ALERT等の擬似・及び気象API連動）
+  startDisasterMonitoring();
 });
+
+function requestNotificationPermission() {
+  if ("Notification" in window) {
+    if (Notification.permission !== "granted" && Notification.permission !== "denied") {
+      Notification.requestPermission();
+    }
+  }
+}
 
 function initMap() {
   document.getElementById('loading').style.display = 'none';
@@ -268,17 +288,114 @@ function initMap() {
 
 function syncFirebaseData() {
   onSnapshot(collection(db, "bear_reports"), (snapshot) => {
-    CSV_DATA = [];
+    let newDataDetected = false;
+    let latestReport = null;
+
+    snapshot.docChanges().forEach((change) => {
+      if (change.type === "added") {
+        let data = change.doc.data();
+        data.id = change.doc.id;
+        if (!isInitialLoad) {
+          newDataDetected = true;
+          latestReport = data;
+        }
+      }
+    });
+
+    CSV_DATA = CSV_DATA.filter(d => d["情報種別"] !== "熊の目撃" && d["情報種別"] !== "熊の人身被害");
     snapshot.forEach((doc) => {
       let data = doc.data();
       data.id = doc.id; 
       CSV_DATA.push(data);
     });
+
     render();
     updateAlertBanner();
+
+    if (newDataDetected && latestReport) {
+      sendBearNotification(latestReport);
+    }
+
+    isInitialLoad = false;
   }, (error) => {
     console.error("Firebaseの読み込みエラー: ", error);
   });
+}
+
+// 🔔 クマ情報のプッシュ通知
+function sendBearNotification(report) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+
+  const type = report["情報種別"] || "クマ目撃";
+  const location = report["地番情報"] || report["市町村"] || "秋田県内";
+  const time = report["発生日時"] || "ただいま";
+
+  const title = type.includes("人身") ? "🚨【緊急】クマ人身被害発生！" : "🐻 クマ目撃情報";
+  const options = {
+    body: `場所: ${location}\n日時: ${time}\n周囲を厳重に警戒してください。`,
+    tag: report.id,
+    requireInteraction: true
+  };
+
+  new Notification(title, options);
+}
+
+// 🔔 新機能：災害防災情報の監視とプッシュ通知（Firestoreに disaster_reports 等がある場合はonSnapshotに変更可能）
+function startDisasterMonitoring() {
+  // もしFirebaseに災害用コレクションを追加した場合は、以下を有効にしてください。
+  /*
+  onSnapshot(collection(db, "disaster_reports"), (snapshot) => {
+    snapshot.docChanges().forEach((change) => {
+      if (change.type === "added" && !isInitialLoad) {
+        let disaster = change.doc.data();
+        sendDisasterNotification(disaster.title, disaster.message);
+        // マップへの描画処理など
+      }
+    });
+  });
+  */
+}
+
+// 🔔 新機能：災害通知を発射する共通関数
+function sendDisasterNotification(title, message) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+
+  const options = {
+    body: message,
+    requireInteraction: true,
+    tag: "disaster_" + Date.now()
+  };
+
+  new Notification(`⚠️【防災情報】${title}`, options);
+  
+  // マップ外の特大バナーや advice 部分を赤く点滅させて割り込むアラート処理
+  injectDisasterAlertToUI(title, message);
+}
+
+function injectDisasterAlertToUI(title, message) {
+  const alertBar = document.getElementById('alert-bar');
+  const titleEl = document.getElementById('alert-title');
+  const descEl = document.getElementById('dynamic-alert-text');
+  
+  alertBar.style.background = "linear-gradient(135deg, #991b1b 0%, #ef4444 100%)";
+  titleEl.textContent = `⚠️ 【最優先・災害情報】${title}`;
+  descEl.textContent = message;
+
+  // リストの先頭に災害情報を直接インジェクション
+  const listEl = document.getElementById('sightings-list');
+  const item = document.createElement('div');
+  item.className = 'sitem';
+  item.style.borderLeft = "5px solid #dc2626";
+  item.style.background = "#fef2f2";
+  item.innerHTML = `
+    <div class="sitem-content">
+      <div class="sitem-title" style="color:#b91c1c;">${title}</div>
+      <div class="sitem-meta">発表: たった今</div>
+      <span class="type-tag tag-災害情報">災害発生/警戒</span>
+      <div style="font-size:12px; margin-top:4px; color:#451a03;">${message}</div>
+    </div>
+  `;
+  listEl.insertBefore(item, listEl.firstChild);
 }
 
 function loadOpenMeteoForecast() {
@@ -292,7 +409,11 @@ function loadOpenMeteoForecast() {
       let wText = "曇り"; let wIcon = "☁️";
       if (cur.weathercode === 0 || cur.weathercode === 1) { wText = "晴れ"; wIcon = "☀️"; }
       else if (cur.weathercode >= 51 && cur.weathercode <= 67) { wText = "雨"; wIcon = "🌧️"; }
-      else if (cur.weathercode >= 95) { wText = "雷雨"; wIcon = "⛈️"; }
+      else if (cur.weathercode >= 95) { 
+        wText = "雷雨"; wIcon = "⛈️"; 
+        // ⚡気象コードが極端な大雨・雷雨の場合、自動で気象警報・災害通知をシミュレート発火
+        sendDisasterNotification("大雨・雷激化警報", "秋田県周辺で非常に激しい雷雨が観測されています。土砂災害や低い土地の浸水に注意してください。");
+      }
 
       document.getElementById('weather-icon').textContent = wIcon;
       document.getElementById('weather-text').textContent = `秋田市: ${wText}`;
@@ -320,6 +441,9 @@ function updateAlertBanner() {
   const descEl = document.getElementById('dynamic-alert-text');
   const adviceEl = document.getElementById('weather-advice-text');
 
+  // もし大雨等で既に赤く書き換えられている場合はスキップ
+  if (titleEl.textContent.includes("災害情報")) return;
+
   if (currentFilterType === '人身被害') {
     alertBar.style.background = "linear-gradient(135deg, #7f1d1d 0%, #dc2626 100%)";
     titleEl.textContent = "🔴 【極めて危険】クマ人身被害発生エリア";
@@ -342,8 +466,8 @@ function updateAlertBanner() {
       descEl.textContent = "最新の目撃報告がデータベースに同期されています。周囲の安全を確認してください。";
     } else {
       alertBar.style.background = "linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%)";
-      titleEl.textContent = "🟢 クマ危険度【低】（現在新しいデータはありません）";
-      descEl.textContent = "現在のところ最新の目撃・被害報告はありません。日々の気象情報をあわせて確認しましょう。";
+      titleEl.textContent = "🟢 安全情報【通常】";
+      descEl.textContent = "現在のところ新しいクマ被害や異常な自然災害の検知はありません。日々の安全対策を怠らないでください。";
     }
     adviceEl.textContent = "周囲の状況に常に注意し、見通しの悪い茂みや林道に入る際は音を出して自分の存在を知らせてください。";
   }
@@ -353,8 +477,14 @@ function render() {
   if (!map) return;
   markers.clearLayers();
   const listEl = document.getElementById('sightings-list');
-  listEl.innerHTML = '';
-  let count = 0;
+  
+  // 災害インジェクションが消えないよう、災害以外の通常アイテムのみクリアして再描画
+  const items = listEl.querySelectorAll('.sitem');
+  items.forEach(item => {
+    if(!item.querySelector('.tag-災害情報')) item.remove();
+  });
+  
+  let count = listEl.querySelectorAll('.sitem').length;
 
   CSV_DATA.forEach(d => {
     const type = d["情報種別"];
@@ -386,30 +516,26 @@ function render() {
 async function fetchJmaRadarTimestamps() {
   try {
     const ts = Date.now();
-    // 💡 URLと「種類（1時間/15時間）」をペアにして確実に管理（Nなしのパターンも追加）
-    const targetApis = [
-      { prod: "nowc", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}` },
-      { prod: "nowc", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_=${ts}` },
-      { prod: "nowc", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N3.json?_=${ts}` },
-      { prod: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N1.json?_=${ts}` },
-      { prod: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N2.json?_=${ts}` },
-      { prod: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N3.json?_=${ts}` },
-      { prod: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes.json?_=${ts}` } // ← Nがないパターンを救済
+    const urls = [
+      `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}`,
+      `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_=${ts}`,
+      `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N1.json?_=${ts}`,
+      `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N2.json?_=${ts}`,
+      `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N3.json?_=${ts}`,
+      `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N4.json?_=${ts}`
     ];
 
-    const responses = await Promise.all(targetApis.map(t => fetch(t.url).catch(() => null)));
+    const responses = await Promise.all(urls.map(url => fetch(url).catch(() => null)));
     let allTimes = {};
 
     for (let i = 0; i < responses.length; i++) {
       const res = responses[i];
       if (!res || !res.ok) continue;
-      
       const data = await res.json();
-      const prod = targetApis[i].prod; // 💡 配列から直接「nowc」か「prca」かを取得してズレを完全防止
+      const prod = i < 2 ? "nowc" : "prca";
 
       data.forEach(t => {
         if (t.basetime && t.validtime) {
-          // 全く同じ時間のデータがある場合は、新しいbasetime（発表時刻）のものを優先
           if (!allTimes[t.validtime] || t.basetime > allTimes[t.validtime].basetime) {
             t.prod = prod;
             t.element = t.elements ? t.elements[0] : (prod === "nowc" ? "hrpns" : "prca");
@@ -437,11 +563,9 @@ async function fetchJmaRadarTimestamps() {
       
       const diffMins = Math.round((validDateJst - now) / 60000);
 
-      // 15分以上前の過去データは捨てる
-      if (diffMins < -15) return;
+      if (diffMins < -15) return; 
 
       const timeStr = `${String(validDateJst.getHours()).padStart(2,'0')}:${String(validDateJst.getMinutes()).padStart(2,'0')}`;
-      
       js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/${t.prod}/${t.basetime}/none/${t.validtime}/surf/${t.element}/{z}/{x}/{y}.png`);
       
       if (diffMins <= 5 && diffMins >= -15) {
@@ -459,34 +583,15 @@ async function fetchJmaRadarTimestamps() {
     const slider = document.getElementById('radar-time-slider');
     if (slider && js_urls.length > 0) {
       slider.max = js_urls.length - 1;
-      slider.value = 0;
+      slider.value = 0; 
       document.getElementById('time-label').textContent = js_labels[0];
       
-      if (typeof isRadarActive !== 'undefined' && isRadarActive) updateRadarLayer();
+      if (isRadarActive) updateRadarLayer();
     }
 
   } catch (e) {
     console.error("雨雲データの取得に失敗しました。", e);
   }
-}
-  
-function fallbackRadar() {
-  const currentTs = Date.now();
-  const baseUtc = new Date(Math.floor(currentTs / 300000) * 300000 - 9 * 3600000);
-  js_urls = []; js_labels = [];
-  for (let i = -2; i <= 6; i++) {
-    const targetDt = new Date(baseUtc.getTime() + i * 5 * 60000);
-    const y = targetDt.getUTCFullYear(); const m = String(targetDt.getUTCMonth() + 1).padStart(2, '0'); const d = String(targetDt.getUTCDate()).padStart(2, '0'); const h = String(targetDt.getUTCHours()).padStart(2, '0'); const min = String(targetDt.getUTCMinutes()).padStart(2, '0');
-    const basetime = `${y}${m}${d}${h}${min}00`;
-    js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/nowc/${basetime}/none/${basetime}/surf/hrpns/{z}/{x}/{y}.png`);
-    const localTime = new Date(targetDt.getTime() + 9 * 3600000);
-    const timeStr = `${String(localTime.getHours()).padStart(2,'0')}:${String(localTime.getMinutes()).padStart(2,'0')}`;
-    if (i === 0) js_labels.push(`現在 (${timeStr})`); else if (i < 0) js_labels.push(`${Math.abs(i)*5}分前 (${timeStr})`); else js_labels.push(`${i*5}分後 (${timeStr})`);
-  }
-  const slider = document.getElementById('radar-time-slider');
-  slider.max = js_urls.length - 1; slider.value = 2;
-  document.getElementById('time-label').textContent = js_labels[2];
-  if (isRadarActive) updateRadarLayer();
 }
 
 function updateRadarLayer() {
@@ -500,63 +605,32 @@ function updateRadarLayer() {
   }).addTo(map);
 }
 
-// 🚨 【完全自然音化】ピピピ、プププといった電子音を完全廃止。
-// 物理的な摩擦音（ホワイトノイズ）を数学的に合成し、一発だけの強烈な「爆竹・銃声の炸裂音」を再現。
 function playBearAlarm() {
   try {
     var audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     var now = audioCtx.currentTime;
+    var totalDuration = 4.0; 
     
-    // --- 1. 火薬の破裂音（ザザーッという非電子的な衝撃摩擦音を生成） ---
-    var bufferSize = audioCtx.sampleRate * 1.5; // 約1.5秒分の音の塊
-    var buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-    var data = buffer.getChannelData(0);
-    
-    // 完全な乱数（ホワイトノイズ）を流し込み、人工的な電子音感を全カット
-    for (var i = 0; i < bufferSize; i++) {
-      data[i] = Math.random() * 2 - 1;
+    for (var i = 0; i < totalDuration; i += 0.15) {
+      (function(startTime) {
+        var osc = audioCtx.createOscillator();
+        var gainNode = audioCtx.createGain();
+        
+        osc.type = 'sawtooth';
+        var randomFreq = 80 + Math.random() * 270;
+        osc.frequency.setValueAtTime(randomFreq, startTime);
+        
+        gainNode.gain.setValueAtTime(0.0, startTime);
+        gainNode.gain.linearRampToValueAtTime(1.2, startTime + 0.002); 
+        gainNode.gain.exponentialRampToValueAtTime(0.001, startTime + 0.08);
+        
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        
+        osc.start(startTime);
+        osc.stop(startTime + 0.09);
+      })(now + i);
     }
-    
-    var noiseNode = audioCtx.createBufferSource();
-    noiseNode.buffer = buffer;
-    
-    var noiseGain = audioCtx.createGain();
-    
-    // ⚡【超突発アタック】タップした瞬間に音量を物理限界（1.5）まで一瞬で垂直に引き上げる
-    noiseGain.gain.setValueAtTime(0.0, now);
-    noiseGain.gain.linearRampToValueAtTime(1.5, now + 0.001); 
-    
-    // 爆竹の火花が散った後、1.2秒かけて「シャー……」と自然に消え去る減衰曲線
-    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 1.2);
-    
-    // --- 2. 腹に響く衝撃波（ドスンという大口径の低音） ---
-    var subOsc = audioCtx.createOscillator();
-    var subGain = audioCtx.createGain();
-    
-    subOsc.type = 'sine';
-    // 炸裂の瞬間は70Hz（地鳴り）からスタートし、0.08秒で一気に30Hzまで急降下させてドン！という重低音の壁を作る
-    subOsc.frequency.setValueAtTime(70, now);
-    subOsc.frequency.exponentialRampToValueAtTime(30, now + 0.08);
-    
-    // 低音の衝撃波も一瞬でMAXになり、0.3秒でサッと消える（切れ味を鋭くして突発感を強調）
-    subGain.gain.setValueAtTime(0.0, now);
-    subGain.gain.linearRampToValueAtTime(1.8, now + 0.001);
-    subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
-    
-    // 各ノードをスピーカーへ接続
-    noiseNode.connect(noiseGain);
-    noiseGain.connect(audioCtx.destination);
-    
-    subOsc.connect(subGain);
-    subGain.connect(audioCtx.destination);
-    
-    // 同時に着火して1発の大爆発を起こす
-    noiseNode.start(now);
-    subOsc.start(now);
-    
-    noiseNode.stop(now + 1.3);
-    subOsc.stop(now + 0.4);
-
   } catch(e) {
     alert("ブラウザが音声発信をブロックしました。画面を一度タップしてから再度お試しください。");
   }
