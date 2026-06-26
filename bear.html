@@ -392,7 +392,8 @@ async function fetchJmaRadarTimestamps() {
       `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N3.json?_=${ts}`,
       `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N1.json?_=${ts}`,
       `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N2.json?_=${ts}`,
-      `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N3.json?_=${ts}`
+      `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N3.json?_=${ts}`,
+      `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N4.json?_=${ts}` // ← 15時間先まで確実に取得するため追加
     ];
 
     const responses = await Promise.all(urls.map(url => fetch(url).catch(() => null)));
@@ -486,10 +487,16 @@ function updateRadarLayer() {
   const slider = document.getElementById('radar-time-slider');
   if (radarLayer) map.removeLayer(radarLayer);
   
-  radarLayer = L.tileLayer(js_urls[slider.value], { 
+  const url = js_urls[slider.value];
+  
+  // 💡 15時間予報（prca）はズームレベル6までしか存在しないため、動的に上限を変更します
+  const isPrca = url.includes('/prca/');
+  const maxZ = isPrca ? 6 : 10;
+
+  radarLayer = L.tileLayer(url, { 
     opacity: 0.65, 
     zIndex: 1500,
-    maxNativeZoom: 10 
+    maxNativeZoom: maxZ // 固定の10から動的変数に変更
   }).addTo(map);
 }
 
