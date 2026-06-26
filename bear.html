@@ -492,10 +492,19 @@ function updateRadarLayer() {
   const slider = document.getElementById('radar-time-slider');
   if (radarLayer) map.removeLayer(radarLayer);
   
-  radarLayer = L.tileLayer(js_urls[slider.value], { 
+  const url = js_urls[slider.value];
+  if (!url) return;
+
+  // 💡 URLに「prca（15時間予報）」が含まれているかを自動判定
+  const isPrca = url.includes('/prca/');
+  
+  // 💡 prcaの場合はズーム上限を「6」に、nowc（1時間予報）の場合は「10」に設定
+  const maxZ = isPrca ? 6 : 10;
+
+  radarLayer = L.tileLayer(url, { 
     opacity: 0.65, 
     zIndex: 1500,
-    maxNativeZoom: 10 
+    maxNativeZoom: maxZ // ← ここが最重要！存在しない拡大画像を自動で引き伸ばしてくれます
   }).addTo(map);
 }
 
@@ -607,6 +616,29 @@ function initEvents() {
     }; 
   });
 }
+
+  // 💡画面の読み込みが完了したあとにイベントを設定する
+document.addEventListener('DOMContentLoaded', function() {
+  const radarSlider = document.getElementById('radar-time-slider');
+  
+  // スライダーが存在する場合だけ実行
+  if (radarSlider) {
+    // スライダーを動かしている最中はテキスト（時間）だけを変える
+    radarSlider.addEventListener('input', function() { 
+      // js_labelsがまだ空っぽじゃなければ更新
+      if (js_labels && js_labels.length > 0) {
+        document.getElementById('time-label').textContent = js_labels[this.value]; 
+      }
+    });
+    
+    // スライダーから指を離した瞬間にだけ、雨雲レーダーの画像を読み込む
+    radarSlider.addEventListener('change', function() { 
+      if (typeof isRadarActive !== 'undefined' && isRadarActive) {
+        updateRadarLayer(); 
+      }
+    });
+  }
+});
 </script>
 </body>
 </html>
