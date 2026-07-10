@@ -389,63 +389,62 @@ function render() {
   document.getElementById('list-count').textContent = `${count} 件の情報`;
 }
 
+
 // ==========================================
-// 15時間先までの雨雲データを統合して取得（修正完了版）
+// 💡【重要修正箇所】
+// 15時間先までの雨雲データを「強制的に作り出す」関数
 // ==========================================
 async function fetchJmaRadarTimestamps() {
   try {
     const ts = Date.now();
-    // 💡 今回の修正で、7〜15時間先までの「fhrpns」のJSONも取得できるようにしました
-    const targetApis = [
-      { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}` },
-      { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_=${ts}` },
-      { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N3.json?_=${ts}` },
-      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N1.json?_=${ts}` },
-      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N2.json?_=${ts}` },
-      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes.json?_=${ts}` },
-      { prod: "fhrpns", element: "fhrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes_N1.json?_=${ts}` },
-      { prod: "fhrpns", element: "fhrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes.json?_=${ts}` }
-    ];
+    // 確実に動作する「ナウキャスト（現在〜1時間先）」だけはAPIから取得する
+    const res = await fetch(`https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}`);
+    const data = await res.json();
+    
+    let sortedTimes = [];
+    data.forEach(t => {
+      if (t.basetime && t.validtime) {
+        sortedTimes.push({
+          basetime: t.basetime,
+          validtime: t.validtime,
+          prod: "nowc",
+          element: t.elements ? t.elements[0] : "hrpns"
+        });
+      }
+    });
 
-    const responses = await Promise.all(targetApis.map(t => fetch(t.url).catch(() => null)));
-    let allTimes = {};
-
-    for (let i = 0; i < responses.length; i++) {
-      const res = responses[i];
-      if (!res || !res.ok) continue;
+    // 取得した時間を古い順に並び替え
+    sortedTimes.sort((a, b) => a.validtime.localeCompare(b.validtime));
+    
+    // 【フォールバック】1〜15時間先のURLを「最新のナウキャスト時間」から強制的に計算して追加
+    if (sortedTimes.length > 0) {
+      const latestNowc = sortedTimes[sortedTimes.length - 1];
       
-      const data = await res.json();
-      if (!Array.isArray(data)) continue;
-
-      const prod = targetApis[i].prod;
-      const defaultElement = targetApis[i].element;
-
-      data.forEach(t => {
-        if (t.basetime && t.validtime) {
-          const existing = allTimes[t.validtime];
-          // 同じ時間のデータがある場合、詳細なものを優先する
-          // 優先度： nowc(5分刻み) > prca(1〜7時間・1kmメッシュ) > fhrpns(7〜15時間・5kmメッシュ)
-          let shouldUpdate = false;
-          if (!existing) {
-            shouldUpdate = true;
-          } else {
-            if (prod === "nowc") shouldUpdate = true;
-            else if (prod === "prca" && existing.prod !== "nowc") shouldUpdate = true;
-          }
-
-          if (shouldUpdate) {
-            t.prod = prod;
-            t.element = t.elements ? t.elements[0] : defaultElement;
-            allTimes[t.validtime] = t;
-          }
-        }
-      });
+      const bY = parseInt(latestNowc.validtime.substring(0,4));
+      const bM = parseInt(latestNowc.validtime.substring(4,6)) - 1;
+      const bD = parseInt(latestNowc.validtime.substring(6,8));
+      const bH = parseInt(latestNowc.validtime.substring(8,10));
+      
+      let baseUtc = new Date(Date.UTC(bY, bM, bD, bH, 0, 0));
+      
+      // JMA prca用の基準時間（分・秒を0000にする）
+      let prcaBasetime = `${baseUtc.getUTCFullYear()}${String(baseUtc.getUTCMonth()+1).padStart(2,'0')}${String(baseUtc.getUTCDate()).padStart(2,'0')}${String(baseUtc.getUTCHours()).padStart(2,'0')}0000`;
+      
+      // 1時間後〜15時間後までのスロットを作成
+      for(let h = 1; h <= 15; h++) {
+         let vDate = new Date(baseUtc.getTime() + h * 3600000);
+         let validStr = `${vDate.getUTCFullYear()}${String(vDate.getUTCMonth()+1).padStart(2,'0')}${String(vDate.getUTCDate()).padStart(2,'0')}${String(vDate.getUTCHours()).padStart(2,'0')}0000`;
+         
+         sortedTimes.push({
+           basetime: prcaBasetime,
+           validtime: validStr,
+           prod: "prca",
+           element: "prca"
+         });
+      }
     }
 
-    // 古い順に並び替え
-    let sortedTimes = Object.values(allTimes).sort((a, b) => a.validtime.localeCompare(b.validtime));
     const now = new Date();
-
     js_urls = [];
     js_labels = [];
 
@@ -496,9 +495,6 @@ async function fetchJmaRadarTimestamps() {
   }
 }
 
-// ==========================================
-// 雨雲レーダーを地図に表示・更新する関数
-// ==========================================
 function updateRadarLayer() {
   const slider = document.getElementById('radar-time-slider');
   
@@ -509,9 +505,9 @@ function updateRadarLayer() {
   const url = js_urls[slider.value];
   if (!url) return;
 
-  // 💡 prca (〜7時間) と fhrpns (〜15時間) はズーム上限6にして自動引き伸ばし
-  const isLowRes = url.includes('/prca/') || url.includes('/fhrpns/');
-  const maxZ = isLowRes ? 6 : 10;
+  // 💡 prca (1〜15時間先) はズーム上限を6にして自動引き伸ばしさせる
+  const isPrca = url.includes('/prca/');
+  const maxZ = isPrca ? 6 : 10;
 
   if (typeof map !== 'undefined') {
     radarLayer = L.tileLayer(url, { 
