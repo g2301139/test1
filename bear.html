@@ -156,7 +156,7 @@ html, body {
 
 <div id="app" style="display:none;">
   <div class="header">
-    <h1>ベアウェザー：秋田県 天気＆安全対策 <span style="color:#fbbf24; font-size:12px;">【15時間レーダー・最終修正版】</span></h1>
+    <h1>ベアウェザー：秋田県 天気＆安全対策 <span style="color:#fbbf24; font-size:12px;">【15時間レーダー・完全版】</span></h1>
     <div class="header-date" id="current-date">----年--月--日</div>
   </div>
   
@@ -256,7 +256,7 @@ let currentFilterType = 'all';
 let js_urls = [];
 let js_labels = [];
 let js_dates = []; 
-let js_prods = []; // ズーム上限切り替え用
+let js_prods = []; 
 let hourlyWeatherData = null; 
 let isRadarActive = false;
 let isBearActive = true;
@@ -267,7 +267,7 @@ window.addEventListener('DOMContentLoaded', () => {
   
   initMap();
   loadOpenMeteoForecast(); 
-  fetchJmaRadarTimestamps(); // ★雨雲データ専用の取得関数に戻しました
+  fetchJmaRadarTimestamps(); 
   
   if(db) syncFirebaseData();
   else {
@@ -396,12 +396,11 @@ function render() {
 }
 
 // ==========================================
-// 💡【修正】雨雲データだけを確実に拾い、ズーム倍率も制御する処理
+// 💡【完全修正版】15時間先までのデータを正しく取得
 // ==========================================
 async function fetchJmaRadarTimestamps() {
   try {
     const ts = Date.now();
-    // 降水（雨雲）に関するデータのみを厳選してURLを指定
     const targetApis = [
       { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}` },
       { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_=${ts}` },
@@ -410,14 +409,17 @@ async function fetchJmaRadarTimestamps() {
       { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N2.json?_=${ts}` },
       { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N3.json?_=${ts}` },
       { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes.json?_=${ts}` },
-      { prod: "fhrpns", element: "fhrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes_N1.json?_=${ts}` },
-      { prod: "fhrpns", element: "fhrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes_N2.json?_=${ts}` },
-      { prod: "fhrpns", element: "fhrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes_N3.json?_=${ts}` },
-      { prod: "fhrpns", element: "fhrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes.json?_=${ts}` }
+      { prod: "fhrpns", element: "prcp", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes_N1.json?_=${ts}` },
+      { prod: "fhrpns", element: "prcp", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes_N2.json?_=${ts}` },
+      { prod: "fhrpns", element: "prcp", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes_N3.json?_=${ts}` },
+      { prod: "fhrpns", element: "prcp", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes.json?_=${ts}` }
     ];
 
     const responses = await Promise.all(targetApis.map(t => fetch(t.url).catch(() => null)));
     let allTimes = {};
+    
+    // データの優先度（現在に近い精度の高いデータを優先）
+    const priority = { "nowc": 3, "prca": 2, "fhrpns": 1 };
 
     for (let i = 0; i < responses.length; i++) {
       const res = responses[i];
@@ -437,9 +439,7 @@ async function fetchJmaRadarTimestamps() {
           let shouldUpdate = false;
           if (!existing) {
             shouldUpdate = true;
-          } else if (prod === "nowc") {
-            shouldUpdate = true;
-          } else if (prod === "prca" && existing.prod === "fhrpns") {
+          } else if (priority[prod] > priority[existing.prod]) {
             shouldUpdate = true;
           }
 
@@ -469,7 +469,7 @@ async function fetchJmaRadarTimestamps() {
       
       const diffMins = Math.round((validDateJst - now) / 60000);
       
-      // 過去30分以上前、または16時間（960分）以上先は除外
+      // 過去30分〜16時間（960分）以内にフィルタリング
       if (diffMins < -30 || diffMins > 960) return;
 
       const timeStr = `${String(validDateJst.getHours()).padStart(2,'0')}:${String(validDateJst.getMinutes()).padStart(2,'0')}`;
@@ -544,10 +544,10 @@ function updateRadarLayer() {
   const prod = js_prods[slider.value]; 
   if (!url) return;
 
-  // 💡 データの種類に応じてズーム上限（maxNativeZoom）を切り替える
+  // データの種類に応じてズーム上限（maxNativeZoom）を切り替える
   let maxZoom = 10;
   if (prod === 'prca' || prod === 'fhrpns') {
-      maxZoom = 6; // 未来の粗いデータはズーム上限を6に制限して引き伸ばす
+      maxZoom = 6; 
   }
   
   if (typeof map !== 'undefined') {
