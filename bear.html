@@ -154,7 +154,7 @@ html, body {
 
 <div id="app" style="display:none;">
   <div class="header">
-    <h1>ベアウェザー：秋田県 天気＆安全対策 <span style="color:#fbbf24; font-size:12px;">【雨雲安定版】</span></h1>
+    <h1>ベアウェザー：秋田県 天気＆安全対策 <span style="color:#fbbf24; font-size:12px;">【雨雲復活・最終版】</span></h1>
     <div class="header-date" id="current-date">----年--月--日</div>
   </div>
   
@@ -408,62 +408,59 @@ function render() {
 }
 
 // ==========================================
-// 💡【究極安定版】確実な基準時間（basetime）を算出して404エラーを防ぐ
+// 💡【雨雲復活・最終版】
+// JMAのサーバーから「確実に画像が存在する時間(JSON)」だけを総ざらいして取得します。
+// 予測（推測）でURLを作らないため、雨雲が途中で消える（404エラー）現象が完全に直ります。
 // ==========================================
 async function fetchJmaRadarTimestamps() {
   try {
     const ts = Date.now();
-    // 1. 直近1時間までの詳細データ（nowc）を取得
-    const res = await fetch(`https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}`);
-    const data = await res.json();
-    
-    let sortedTimes = [];
-    data.forEach(t => {
-      if (t.basetime && t.validtime) {
-        sortedTimes.push({ 
-          basetime: t.basetime, 
-          validtime: t.validtime, 
-          prod: "nowc", 
-          element: t.elements ? t.elements[0] : "hrpns" 
-        });
-      }
-    });
-    
-    // 2. 1時間〜15時間先（prca）のURLを生成
-    // 気象庁のサーバー更新のラグ（毎時40分頃）を考慮し、必ず画像が存在する安全な「basetime」を算出
-    const nowUtc = new Date();
-    if (nowUtc.getUTCMinutes() < 40) {
-      nowUtc.setUTCHours(nowUtc.getUTCHours() - 1);
-    }
-    const bY = nowUtc.getUTCFullYear();
-    const bM = String(nowUtc.getUTCMonth() + 1).padStart(2, '0');
-    const bD = String(nowUtc.getUTCDate()).padStart(2, '0');
-    const bH = String(nowUtc.getUTCHours()).padStart(2, '0');
-    const safeBasetime = `${bY}${bM}${bD}${bH}0000`; // これが絶対に404にならない基準時間
-    
-    // 基準時間をもとに、15時間先までのURLを1時間刻みで作る
-    let baseDate = new Date(Date.UTC(bY, nowUtc.getUTCMonth(), nowUtc.getUTCDate(), nowUtc.getUTCHours(), 0, 0));
-    
-    for (let i = 1; i <= 15; i++) {
-      let vDate = new Date(baseDate.getTime() + i * 3600000); // 1時間ずつ足す
-      const vY = vDate.getUTCFullYear();
-      const vM = String(vDate.getUTCMonth() + 1).padStart(2, '0');
-      const vD = String(vDate.getUTCDate()).padStart(2, '0');
-      const vH = String(vDate.getUTCHours()).padStart(2, '0');
-      const vTime = `${vY}${vM}${vD}${vH}0000`;
+    // nowc: ナウキャスト(現在〜1時間) / prca: 降水短時間(1時間〜15時間)
+    const targetApis = [
+      { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}` },
+      { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_=${ts}` },
+      { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N3.json?_=${ts}` },
+      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N1.json?_=${ts}` },
+      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N2.json?_=${ts}` },
+      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N3.json?_=${ts}` },
+      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes.json?_=${ts}` }
+    ];
+
+    const responses = await Promise.all(targetApis.map(t => fetch(t.url).catch(() => null)));
+    let allTimes = {};
+
+    for (let i = 0; i < responses.length; i++) {
+      const res = responses[i];
+      if (!res || !res.ok) continue;
       
-      sortedTimes.push({ 
-        basetime: safeBasetime, 
-        validtime: vTime, 
-        prod: "prca", 
-        element: "prca" 
+      const data = await res.json();
+      if (!Array.isArray(data)) continue;
+
+      const prod = targetApis[i].prod;
+      const defaultElement = targetApis[i].element;
+
+      data.forEach(t => {
+        if (t.basetime && t.validtime) {
+          const vTime = t.validtime;
+          const existing = allTimes[vTime];
+          
+          // nowc（5分刻みで高精度）を優先する
+          if (!existing || prod === "nowc") {
+            allTimes[vTime] = {
+              basetime: t.basetime,
+              validtime: t.validtime,
+              prod: prod,
+              element: t.elements ? t.elements[0] : defaultElement
+            };
+          }
+        }
       });
     }
 
-    // 取得した時間を古い順に整理してURLリストに登録
-    sortedTimes.sort((a, b) => a.validtime.localeCompare(b.validtime));
-    
+    // 時間順に並び替え
+    let sortedTimes = Object.values(allTimes).sort((a, b) => a.validtime.localeCompare(b.validtime));
     const now = new Date();
+
     js_urls = [];
     js_labels = [];
 
@@ -477,7 +474,9 @@ async function fetchJmaRadarTimestamps() {
       const validDateJst = new Date(validDateUtc.getTime());
       
       const diffMins = Math.round((validDateJst - now) / 60000);
-      if (diffMins < -15) return;
+      
+      // 過去30分以上前のデータはスライダーから除外
+      if (diffMins < -30) return;
 
       const timeStr = `${String(validDateJst.getHours()).padStart(2,'0')}:${String(validDateJst.getMinutes()).padStart(2,'0')}`;
       js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/${t.prod}/${t.basetime}/none/${t.validtime}/surf/${t.element}/{z}/{x}/{y}.png`);
@@ -486,6 +485,8 @@ async function fetchJmaRadarTimestamps() {
         js_labels.push(`現在 (${timeStr})`);
       } else if (diffMins > 5 && diffMins < 60) {
         js_labels.push(`${diffMins}分後 (${timeStr})`);
+      } else if (diffMins < -15) {
+        js_labels.push(`${Math.abs(diffMins)}分前 (${timeStr})`);
       } else {
         const hDiff = Math.floor(diffMins / 60);
         const mDiff = diffMins % 60;
@@ -494,7 +495,6 @@ async function fetchJmaRadarTimestamps() {
       }
     });
 
-    // スライダーの初期設定
     const slider = document.getElementById('radar-time-slider');
     if (slider && js_urls.length > 0) {
       slider.max = js_urls.length - 1;
