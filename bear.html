@@ -154,7 +154,7 @@ html, body {
 
 <div id="app" style="display:none;">
   <div class="header">
-    <h1>ベアウェザー：秋田県 天気＆安全対策 <span style="color:#fbbf24; font-size:12px;">【雨雲復活・最終版】</span></h1>
+    <h1>ベアウェザー：秋田県 天気＆安全対策 <span style="color:#fbbf24; font-size:12px;">【15時間レーダー完全版V2】</span></h1>
     <div class="header-date" id="current-date">----年--月--日</div>
   </div>
   
@@ -408,14 +408,12 @@ function render() {
 }
 
 // ==========================================
-// 💡【雨雲復活・最終版】
-// JMAのサーバーから「確実に画像が存在する時間(JSON)」だけを総ざらいして取得します。
-// 予測（推測）でURLを作らないため、雨雲が途中で消える（404エラー）現象が完全に直ります。
+// 💡【完全版V2】気象庁のAPIから現在〜15時間先までの全リストを漏れなく取得！
 // ==========================================
 async function fetchJmaRadarTimestamps() {
   try {
     const ts = Date.now();
-    // nowc: ナウキャスト(現在〜1時間) / prca: 降水短時間(1時間〜15時間)
+    // 💡 fhrpns（7〜15時間先の降水予報）を完全に追加しました
     const targetApis = [
       { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}` },
       { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_=${ts}` },
@@ -423,7 +421,11 @@ async function fetchJmaRadarTimestamps() {
       { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N1.json?_=${ts}` },
       { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N2.json?_=${ts}` },
       { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N3.json?_=${ts}` },
-      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes.json?_=${ts}` }
+      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes.json?_=${ts}` },
+      { prod: "fhrpns", element: "fhrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes_N1.json?_=${ts}` },
+      { prod: "fhrpns", element: "fhrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes_N2.json?_=${ts}` },
+      { prod: "fhrpns", element: "fhrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes_N3.json?_=${ts}` },
+      { prod: "fhrpns", element: "fhrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes.json?_=${ts}` }
     ];
 
     const responses = await Promise.all(targetApis.map(t => fetch(t.url).catch(() => null)));
@@ -444,8 +446,17 @@ async function fetchJmaRadarTimestamps() {
           const vTime = t.validtime;
           const existing = allTimes[vTime];
           
-          // nowc（5分刻みで高精度）を優先する
-          if (!existing || prod === "nowc") {
+          // データの解像度（精度）の優先度： nowc(5分刻み) > prca(1kmメッシュ) > fhrpns(5kmメッシュ)
+          let shouldUpdate = false;
+          if (!existing) {
+            shouldUpdate = true;
+          } else if (prod === "nowc") {
+            shouldUpdate = true;
+          } else if (prod === "prca" && existing.prod === "fhrpns") {
+            shouldUpdate = true;
+          }
+
+          if (shouldUpdate) {
             allTimes[vTime] = {
               basetime: t.basetime,
               validtime: t.validtime,
@@ -457,7 +468,7 @@ async function fetchJmaRadarTimestamps() {
       });
     }
 
-    // 時間順に並び替え
+    // 取得した時間を古い順に並び替え
     let sortedTimes = Object.values(allTimes).sort((a, b) => a.validtime.localeCompare(b.validtime));
     const now = new Date();
 
@@ -479,6 +490,8 @@ async function fetchJmaRadarTimestamps() {
       if (diffMins < -30) return;
 
       const timeStr = `${String(validDateJst.getHours()).padStart(2,'0')}:${String(validDateJst.getMinutes()).padStart(2,'0')}`;
+      
+      // 画像のURLを生成して配列に格納
       js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/${t.prod}/${t.basetime}/none/${t.validtime}/surf/${t.element}/{z}/{x}/{y}.png`);
       
       if (diffMins <= 5 && diffMins >= -15) {
@@ -498,10 +511,14 @@ async function fetchJmaRadarTimestamps() {
     const slider = document.getElementById('radar-time-slider');
     if (slider && js_urls.length > 0) {
       slider.max = js_urls.length - 1;
+      
+      // スライダーの初期位置を自動で「現在」に合わせる
       const currentIndex = js_labels.findIndex(label => label.includes("現在"));
       slider.value = currentIndex !== -1 ? currentIndex : 0;
+      
       const timeLabel = document.getElementById('time-label');
       if (timeLabel) timeLabel.textContent = js_labels[slider.value];
+      
       if (isRadarActive) updateRadarLayer();
     }
   } catch (e) {
@@ -519,14 +536,14 @@ function updateRadarLayer() {
   const url = js_urls[slider.value];
   if (!url) return;
 
-  // 1時間先〜15時間先（prca）のデータは気象庁側にズーム上限があるため6に制限（必須）
-  const isPrca = url.includes('/prca/');
+  // 💡 prca (1〜7時間先) と fhrpns (7〜15時間先) は詳細画像がないので、上限を6にして無理やり引き伸ばす設定（必須）
+  const isLowRes = url.includes('/prca/') || url.includes('/fhrpns/');
   
   if (typeof map !== 'undefined') {
     radarLayer = L.tileLayer(url, { 
       opacity: 0.65, 
       zIndex: 1500, 
-      maxNativeZoom: isPrca ? 6 : 10 // ここで画像を自動引き伸ばしして表示
+      maxNativeZoom: isLowRes ? 6 : 10 // ここが最重要。これがないと未来の雨雲が真っ白になります。
     }).addTo(map);
   }
 }
@@ -577,7 +594,7 @@ async function playBearAlarm(event) {
   }
 }
 
-// 💡 修正箇所：スライダーを動かしている最中に雨雲を連動して切り替える
+// 💡 修正箇所：スライダーを動かしている最中 (input) に雨雲を連動して切り替える
 function initEvents() {
   document.getElementById('btn-alarm').addEventListener('click', (e) => playBearAlarm(e));
   document.getElementById('btn-floating-alarm').addEventListener('click', (e) => playBearAlarm(e));
@@ -591,7 +608,7 @@ function initEvents() {
   
   const radarSlider = document.getElementById('radar-time-slider');
   if (radarSlider) {
-    // スライダーを動かしている最中 (input) に時間を書き換えつつ、雨雲も連動して切り替える
+    // スライダーを動かしている最中に時間を書き換えつつ、雨雲も連動して切り替える
     radarSlider.addEventListener('input', function() { 
       if (js_labels && js_labels.length > 0) {
         document.getElementById('time-label').textContent = js_labels[this.value]; 
