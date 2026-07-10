@@ -133,13 +133,12 @@ html, body {
   background: #f8fafc;
 }
 .map-control-overlay.open .menu-content {
-  max-height: 350px; padding: 10px;
+  max-height: 300px; padding: 10px;
 }
 .map-ctrl-btn { width: 100%; padding: 10px; margin-bottom: 6px; border: none; border-radius: 6px; font-size: 13px; font-weight: bold; cursor: pointer; color: white; }
 .map-ctrl-btn:last-child { margin-bottom: 0; }
 #btn-radar-toggle { background: #2563eb; }
 #btn-bear-toggle { background: #475569; }
-#btn-gps { background: #16a34a; }
 #btn-alarm { background: linear-gradient(135deg, #dc2626, #7f1d1d); box-shadow: 0 2px 4px rgba(0,0,0,0.15); animation: pulse 2s infinite; }
 #btn-alarm:active { transform: scale(0.98); }
 
@@ -252,7 +251,6 @@ html, body {
               <input type="range" id="radar-time-slider" min="0" max="0" value="0" class="range-slider">
             </div>
             <button class="map-ctrl-btn" id="btn-bear-toggle" style="background: #1e293b;">🐻 熊マーカーを隠す</button>
-            <button class="map-ctrl-btn" id="btn-gps">📍 現在地を取得</button>
           </div>
         </div>
 
@@ -674,8 +672,6 @@ function initEvents() {
   }
 
   document.getElementById('btn-bear-toggle').onclick = function() { isBearActive = !isBearActive; if (isBearActive) { this.style.background = '#1e293b'; this.textContent = '🐻 熊マーカーを隠す'; map.addLayer(markers); } else { this.style.background = '#64748b'; this.textContent = '🐻 熊マーカーを表示'; map.removeLayer(markers); } };
-  
-  document.getElementById('btn-gps').onclick = () => { if (navigator.geolocation) { navigator.geolocation.getCurrentPosition(pos => { const lat = pos.coords.latitude; const lng = pos.coords.longitude; map.flyTo([lat, lng], 13); if (userMarker) map.removeLayer(userMarker); userMarker = L.circleMarker([lat, lng], { radius: 8, fillColor: '#2563eb', color: '#fff', weight: 2 }).addTo(map).bindPopup("現在地").openPopup(); }); } };
   
   document.querySelectorAll('#type-filters .fbtn').forEach(btn => { 
     btn.onclick = function() { 
