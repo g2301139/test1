@@ -111,7 +111,7 @@ html, body {
 .time-display { color: #dc2626; font-weight: bold; }
 .range-slider { width: 100%; cursor: pointer; margin-top: 6px; }
 
-/* 新機能：スライダー連動の予報表示エリア */
+/* スライダー連動の予報表示エリア */
 .slider-weather-info {
   margin-top: 8px; padding: 8px; background: #eff6ff; border: 1px dashed #93c5fd; border-radius: 6px;
   font-size: 11px; text-align: center; font-weight: bold; color: #1e3a8a;
@@ -156,7 +156,7 @@ html, body {
 
 <div id="app" style="display:none;">
   <div class="header">
-    <h1>ベアウェザー：秋田県 天気＆安全対策 <span style="color:#fbbf24; font-size:12px;">【15時間レーダー・スライダー連動版】</span></h1>
+    <h1>ベアウェザー：秋田県 天気＆安全対策 <span style="color:#fbbf24; font-size:12px;">【15時間レーダー・最終修正版】</span></h1>
     <div class="header-date" id="current-date">----年--月--日</div>
   </div>
   
@@ -211,7 +211,6 @@ html, body {
             <div class="slider-label">時間: <span class="time-display" id="time-label">-</span></div>
             <input type="range" id="radar-time-slider" min="0" max="0" value="0" class="range-slider">
             
-            <!-- スライダー連動の予報表示エリア -->
             <div class="slider-weather-info" id="slider-sync-info">
               <span>天気情報を同期中...</span>
             </div>
@@ -256,8 +255,9 @@ let map = null, markers = null, radarLayer = null, userMarker = null;
 let currentFilterType = 'all';
 let js_urls = [];
 let js_labels = [];
-let js_dates = []; // 天気連動用の日時データ
-let hourlyWeatherData = null; // Open-Meteoの1時間ごとの全データ
+let js_dates = []; 
+let js_prods = []; // ズーム上限切り替え用
+let hourlyWeatherData = null; 
 let isRadarActive = false;
 let isBearActive = true;
 
@@ -266,8 +266,8 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('current-date').textContent = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日`;
   
   initMap();
-  loadOpenMeteoForecast(); // 先に天気データを取得
-  fetchJmaRadarTimestampsBruteForce(); // 気象庁サーバー総当たり探索
+  loadOpenMeteoForecast(); 
+  fetchJmaRadarTimestamps(); // ★雨雲データ専用の取得関数に戻しました
   
   if(db) syncFirebaseData();
   else {
@@ -319,7 +319,7 @@ function loadOpenMeteoForecast() {
     .then(res => res.json())
     .then(data => {
       if(!data || !data.current_weather) return;
-      hourlyWeatherData = data.hourly; // 全データを保存して後でスライダーと連動させる
+      hourlyWeatherData = data.hourly; 
       
       const cur = data.current_weather;
       document.getElementById('weather-temp').textContent = `${cur.temperature}°C`;
@@ -349,7 +349,6 @@ function loadOpenMeteoForecast() {
 }
 
 function updateAlertBanner() {
-  // 省略: 前回のコードと同じ（文字数削減のためそのまま）
   const alertBar = document.getElementById('alert-bar');
   const titleEl = document.getElementById('alert-title');
   const descEl = document.getElementById('dynamic-alert-text');
@@ -397,24 +396,26 @@ function render() {
 }
 
 // ==========================================
-// 💡【大改革】気象庁サーバーをブラウザから総当たりで探し出し、
-// 最も奥底にある15時間先データまで完璧に拾い上げるシステム
+// 💡【修正】雨雲データだけを確実に拾い、ズーム倍率も制御する処理
 // ==========================================
-async function fetchJmaRadarTimestampsBruteForce() {
+async function fetchJmaRadarTimestamps() {
   try {
     const ts = Date.now();
-    // 気象庁の予測データが存在する可能性のある全てのフォルダ名を指定
-    const prodCandidates = ["nowc", "prca", "fhrpns", "kaikotan", "radnowc", "srpf", "shrt", "wdist"];
-    const suffix = ["targetTimes_N1.json", "targetTimes_N2.json", "targetTimes_N3.json", "targetTimes.json"];
-    
-    let targetApis = [];
-    prodCandidates.forEach(p => {
-      suffix.forEach(s => {
-        targetApis.push({ prod: p, url: `https://www.jma.go.jp/bosai/jmatile/data/${p}/${s}?_=${ts}` });
-      });
-    });
+    // 降水（雨雲）に関するデータのみを厳選してURLを指定
+    const targetApis = [
+      { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}` },
+      { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_=${ts}` },
+      { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N3.json?_=${ts}` },
+      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N1.json?_=${ts}` },
+      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N2.json?_=${ts}` },
+      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N3.json?_=${ts}` },
+      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes.json?_=${ts}` },
+      { prod: "fhrpns", element: "fhrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes_N1.json?_=${ts}` },
+      { prod: "fhrpns", element: "fhrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes_N2.json?_=${ts}` },
+      { prod: "fhrpns", element: "fhrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes_N3.json?_=${ts}` },
+      { prod: "fhrpns", element: "fhrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes.json?_=${ts}` }
+    ];
 
-    // 全てのURLに同時にリクエストを送信して、生きているものを探す
     const responses = await Promise.all(targetApis.map(t => fetch(t.url).catch(() => null)));
     let allTimes = {};
 
@@ -426,26 +427,36 @@ async function fetchJmaRadarTimestampsBruteForce() {
       if (!Array.isArray(data)) continue;
 
       const prod = targetApis[i].prod;
+      const element = targetApis[i].element;
+
       data.forEach(t => {
         if (t.basetime && t.validtime) {
           const vTime = t.validtime;
-          // 要素(element)を抽出。降水に関係するもの(hrpns, prcaなど)を優先
-          const el = (t.elements && t.elements.length > 0) ? t.elements[0] : prod;
+          const existing = allTimes[vTime];
           
-          if (!allTimes[vTime] || prod === "nowc") {
-            allTimes[vTime] = { basetime: t.basetime, validtime: t.validtime, prod: prod, element: el };
+          let shouldUpdate = false;
+          if (!existing) {
+            shouldUpdate = true;
+          } else if (prod === "nowc") {
+            shouldUpdate = true;
+          } else if (prod === "prca" && existing.prod === "fhrpns") {
+            shouldUpdate = true;
+          }
+
+          if (shouldUpdate) {
+            allTimes[vTime] = { basetime: t.basetime, validtime: t.validtime, prod: prod, element: element };
           }
         }
       });
     }
 
-    // 時間順に並び替え
     let sortedTimes = Object.values(allTimes).sort((a, b) => a.validtime.localeCompare(b.validtime));
     const now = new Date();
 
     js_urls = [];
     js_labels = [];
-    js_dates = []; // 天気連動用
+    js_dates = [];
+    js_prods = []; 
 
     sortedTimes.forEach((t) => {
       const year = parseInt(t.validtime.substring(0,4));
@@ -458,12 +469,14 @@ async function fetchJmaRadarTimestampsBruteForce() {
       
       const diffMins = Math.round((validDateJst - now) / 60000);
       
-      // 過去30分以上前は除外
-      if (diffMins < -30) return;
+      // 過去30分以上前、または16時間（960分）以上先は除外
+      if (diffMins < -30 || diffMins > 960) return;
 
       const timeStr = `${String(validDateJst.getHours()).padStart(2,'0')}:${String(validDateJst.getMinutes()).padStart(2,'0')}`;
+      
       js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/${t.prod}/${t.basetime}/none/${t.validtime}/surf/${t.element}/{z}/{x}/{y}.png`);
       js_dates.push(validDateJst);
+      js_prods.push(t.prod); 
       
       if (diffMins <= 5 && diffMins >= -15) js_labels.push(`現在 (${timeStr})`);
       else if (diffMins > 5 && diffMins < 60) js_labels.push(`${diffMins}分後 (${timeStr})`);
@@ -483,16 +496,15 @@ async function fetchJmaRadarTimestampsBruteForce() {
       slider.value = currentIndex !== -1 ? currentIndex : 0;
       
       document.getElementById('time-label').textContent = js_labels[slider.value];
-      updateSyncWeather(slider.value); // スライダー連動の天気を更新
+      updateSyncWeather(slider.value); 
       
       if (isRadarActive) updateRadarLayer();
     }
   } catch (e) {
-    console.error("雨雲データの総当たり取得に失敗:", e);
+    console.error("雨雲データの取得に失敗:", e);
   }
 }
 
-// 💡 スライダーを動かしたときに、連動して「秋田市の確実な天気情報」を文字で表示する新機能！
 function updateSyncWeather(index) {
   const syncInfoEl = document.getElementById('slider-sync-info');
   if (!js_dates[index] || !hourlyWeatherData) {
@@ -501,11 +513,10 @@ function updateSyncWeather(index) {
   }
   
   const targetDate = js_dates[index];
-  // ターゲット時間に一番近い1時間ごとのデータを検索
   const targetIsoStr = targetDate.toISOString().substring(0,13) + ":00"; 
   
   let matchIndex = hourlyWeatherData.time.findIndex(t => t.includes(targetIsoStr));
-  if (matchIndex === -1) matchIndex = 0; // 見つからない場合は現在地
+  if (matchIndex === -1) matchIndex = 0; 
   
   const temp = hourlyWeatherData.temperature_2m[matchIndex];
   const pop = hourlyWeatherData.precipitation_probability[matchIndex];
@@ -530,17 +541,20 @@ function updateRadarLayer() {
   }
   
   const url = js_urls[slider.value];
+  const prod = js_prods[slider.value]; 
   if (!url) return;
 
-  // 💡 【最大のポイント】未来の雨雲データは画質が極端に粗いため、ズーム上限を「5」に制限して無理やり引き伸ばして表示させます。
-  // これにより、ズームした際に「画像がありません(404)」エラーになって雨雲が消える現象を完全に防ぎます。
-  const isFuture = slider.value > js_labels.findIndex(label => label.includes("現在")) + 6;
+  // 💡 データの種類に応じてズーム上限（maxNativeZoom）を切り替える
+  let maxZoom = 10;
+  if (prod === 'prca' || prod === 'fhrpns') {
+      maxZoom = 6; // 未来の粗いデータはズーム上限を6に制限して引き伸ばす
+  }
   
   if (typeof map !== 'undefined') {
     radarLayer = L.tileLayer(url, { 
       opacity: 0.65, 
       zIndex: 1500, 
-      maxNativeZoom: isFuture ? 5 : 10 // 未来データはズーム5で強制引き伸ばし！
+      maxNativeZoom: maxZoom 
     }).addTo(map);
   }
 }
@@ -600,14 +614,13 @@ function initEvents() {
   
   const radarSlider = document.getElementById('radar-time-slider');
   if (radarSlider) {
-    // 💡 スライダー操作中 (input) に文字と雨雲の両方を連動更新！
     radarSlider.addEventListener('input', function() { 
       if (js_labels && js_labels.length > 0) {
         document.getElementById('time-label').textContent = js_labels[this.value];
-        updateSyncWeather(this.value); // テキスト天気も更新
+        updateSyncWeather(this.value); 
       }
       if (isRadarActive) {
-        updateRadarLayer(); // 雨雲画像も更新
+        updateRadarLayer(); 
       }
     });
   }
