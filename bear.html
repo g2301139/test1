@@ -91,7 +91,7 @@ html, body {
 .tag-熊の目撃 { background: #64748b; }
 .tag-熊の人身被害 { background: #dc2626; }
 
-/* 🗺️ マップエリア */
+/* マップエリア */
 #map { flex: 1; height: 100%; width: 100%; background: #e5e9f0; position: relative; }
 
 .map-control-overlay {
@@ -390,19 +390,21 @@ function render() {
 }
 
 // ==========================================
-// 15時間先までの雨雲データを取得する統合関数
+// 15時間先までの雨雲データを統合して取得（修正完了版）
 // ==========================================
 async function fetchJmaRadarTimestamps() {
   try {
     const ts = Date.now();
+    // 💡 今回の修正で、7〜15時間先までの「fhrpns」のJSONも取得できるようにしました
     const targetApis = [
       { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}` },
       { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_=${ts}` },
       { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N3.json?_=${ts}` },
       { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N1.json?_=${ts}` },
       { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N2.json?_=${ts}` },
-      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N3.json?_=${ts}` },
-      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes.json?_=${ts}` }
+      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes.json?_=${ts}` },
+      { prod: "fhrpns", element: "fhrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes_N1.json?_=${ts}` },
+      { prod: "fhrpns", element: "fhrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes.json?_=${ts}` }
     ];
 
     const responses = await Promise.all(targetApis.map(t => fetch(t.url).catch(() => null)));
@@ -420,7 +422,18 @@ async function fetchJmaRadarTimestamps() {
 
       data.forEach(t => {
         if (t.basetime && t.validtime) {
-          if (!allTimes[t.validtime] || prod === "nowc") {
+          const existing = allTimes[t.validtime];
+          // 同じ時間のデータがある場合、詳細なものを優先する
+          // 優先度： nowc(5分刻み) > prca(1〜7時間・1kmメッシュ) > fhrpns(7〜15時間・5kmメッシュ)
+          let shouldUpdate = false;
+          if (!existing) {
+            shouldUpdate = true;
+          } else {
+            if (prod === "nowc") shouldUpdate = true;
+            else if (prod === "prca" && existing.prod !== "nowc") shouldUpdate = true;
+          }
+
+          if (shouldUpdate) {
             t.prod = prod;
             t.element = t.elements ? t.elements[0] : defaultElement;
             allTimes[t.validtime] = t;
@@ -429,6 +442,7 @@ async function fetchJmaRadarTimestamps() {
       });
     }
 
+    // 古い順に並び替え
     let sortedTimes = Object.values(allTimes).sort((a, b) => a.validtime.localeCompare(b.validtime));
     const now = new Date();
 
@@ -447,6 +461,7 @@ async function fetchJmaRadarTimestamps() {
       
       const diffMins = Math.round((validDateJst - now) / 60000);
 
+      // 過去15分以上前のデータはスライダーから除外
       if (diffMins < -15) return;
 
       const timeStr = `${String(validDateJst.getHours()).padStart(2,'0')}:${String(validDateJst.getMinutes()).padStart(2,'0')}`;
@@ -494,8 +509,9 @@ function updateRadarLayer() {
   const url = js_urls[slider.value];
   if (!url) return;
 
-  const isPrca = url.includes('/prca/');
-  const maxZ = isPrca ? 6 : 10; // prcaの場合は上限を6にして自動引き伸ばし
+  // 💡 prca (〜7時間) と fhrpns (〜15時間) はズーム上限6にして自動引き伸ばし
+  const isLowRes = url.includes('/prca/') || url.includes('/fhrpns/');
+  const maxZ = isLowRes ? 6 : 10;
 
   if (typeof map !== 'undefined') {
     radarLayer = L.tileLayer(url, { 
@@ -590,7 +606,6 @@ function initEvents() {
     else { this.style.background = '#2563eb'; this.textContent = '🌧️ 雨雲レーダーを表示'; if (radarLayer) { map.removeLayer(radarLayer); radarLayer = null; } }
   };
   
-  // スライダー操作イベントの整理
   const radarSlider = document.getElementById('radar-time-slider');
   if (radarSlider) {
     radarSlider.addEventListener('input', function() { 
