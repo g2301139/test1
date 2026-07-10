@@ -129,7 +129,9 @@ html, body {
   transform: scale(0.92); box-shadow: 0 2px 6px rgba(0,0,0,0.3);
 }
 
-#loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #fff; z-index: 9999; display: flex; align-items: center; justify-content: center; font-weight: bold; }
+#loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #fff; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: bold; }
+.loading-text { font-size: 18px; margin-bottom: 10px; }
+.loading-sub { font-size: 12px; color: #2563eb; }
 
 @media (max-width: 768px) {
   .content-body { flex-direction: column; }
@@ -145,11 +147,15 @@ html, body {
 </head>
 <body>
 
-<div id="loading">クラウドデータベースと同期中...</div>
+<div id="loading">
+  <div class="loading-text">クラウドデータベースと同期中...</div>
+  <div class="loading-sub">【アップデート読込中...】</div>
+</div>
 
 <div id="app" style="display:none;">
   <div class="header">
-    <h1>ベアウェザー：秋田県 天気＆リアルタイム安全対策</h1>
+    <!-- 変更成功の目印となるタイトル -->
+    <h1>ベアウェザー：秋田県 天気＆安全対策 <span style="color:#fbbf24; font-size:12px;">【15時間レーダー対応版】</span></h1>
     <div class="header-date" id="current-date">----年--月--日</div>
   </div>
   
@@ -219,6 +225,10 @@ html, body {
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { getFirestore, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
+// ==========================================
+// ⚠️ 注意：以下の値をご自身のFirebaseプロジェクトの設定に戻してください
+// ※ここがダミーのままだとエラーになり画面が真っ白で止まります
+// ==========================================
 const firebaseConfig = {
   apiKey: "YOUR_API_KEY",
   authDomain: "YOUR_AUTH_DOMAIN",
@@ -228,8 +238,13 @@ const firebaseConfig = {
   appId: "YOUR_APP_ID"
 };
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+let app, db;
+try {
+  app = initializeApp(firebaseConfig);
+  db = getFirestore(app);
+} catch (e) {
+  console.error("Firebase初期化エラー (設定がダミーのままです):", e);
+}
 
 let CSV_DATA = [];
 let map = null, markers = null, radarLayer = null, userMarker = null;
@@ -247,7 +262,12 @@ window.addEventListener('DOMContentLoaded', () => {
   initMap();
   fetchJmaRadarTimestamps();
   loadOpenMeteoForecast();
-  syncFirebaseData();
+  if(db) syncFirebaseData();
+  else {
+    document.getElementById('list-count').textContent = "⚠️ Firebase設定エラー";
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('app').style.display = 'flex';
+  }
 });
 
 function initMap() {
@@ -389,58 +409,34 @@ function render() {
   document.getElementById('list-count').textContent = `${count} 件の情報`;
 }
 
-
-// ==========================================
-// 💡【重要修正箇所】
-// 15時間先までの雨雲データを「強制的に作り出す」関数
-// ==========================================
+// 15時間先までの雨雲データを強制生成
 async function fetchJmaRadarTimestamps() {
   try {
     const ts = Date.now();
-    // 確実に動作する「ナウキャスト（現在〜1時間先）」だけはAPIから取得する
     const res = await fetch(`https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}`);
     const data = await res.json();
     
     let sortedTimes = [];
     data.forEach(t => {
       if (t.basetime && t.validtime) {
-        sortedTimes.push({
-          basetime: t.basetime,
-          validtime: t.validtime,
-          prod: "nowc",
-          element: t.elements ? t.elements[0] : "hrpns"
-        });
+        sortedTimes.push({ basetime: t.basetime, validtime: t.validtime, prod: "nowc", element: t.elements ? t.elements[0] : "hrpns" });
       }
     });
-
-    // 取得した時間を古い順に並び替え
     sortedTimes.sort((a, b) => a.validtime.localeCompare(b.validtime));
     
-    // 【フォールバック】1〜15時間先のURLを「最新のナウキャスト時間」から強制的に計算して追加
     if (sortedTimes.length > 0) {
       const latestNowc = sortedTimes[sortedTimes.length - 1];
-      
       const bY = parseInt(latestNowc.validtime.substring(0,4));
       const bM = parseInt(latestNowc.validtime.substring(4,6)) - 1;
       const bD = parseInt(latestNowc.validtime.substring(6,8));
       const bH = parseInt(latestNowc.validtime.substring(8,10));
-      
       let baseUtc = new Date(Date.UTC(bY, bM, bD, bH, 0, 0));
-      
-      // JMA prca用の基準時間（分・秒を0000にする）
       let prcaBasetime = `${baseUtc.getUTCFullYear()}${String(baseUtc.getUTCMonth()+1).padStart(2,'0')}${String(baseUtc.getUTCDate()).padStart(2,'0')}${String(baseUtc.getUTCHours()).padStart(2,'0')}0000`;
       
-      // 1時間後〜15時間後までのスロットを作成
       for(let h = 1; h <= 15; h++) {
          let vDate = new Date(baseUtc.getTime() + h * 3600000);
          let validStr = `${vDate.getUTCFullYear()}${String(vDate.getUTCMonth()+1).padStart(2,'0')}${String(vDate.getUTCDate()).padStart(2,'0')}${String(vDate.getUTCHours()).padStart(2,'0')}0000`;
-         
-         sortedTimes.push({
-           basetime: prcaBasetime,
-           validtime: validStr,
-           prod: "prca",
-           element: "prca"
-         });
+         sortedTimes.push({ basetime: prcaBasetime, validtime: validStr, prod: "prca", element: "prca" });
       }
     }
 
@@ -454,13 +450,10 @@ async function fetchJmaRadarTimestamps() {
       const day = parseInt(t.validtime.substring(6,8));
       const hour = parseInt(t.validtime.substring(8,10));
       const min = parseInt(t.validtime.substring(10,12));
-      
       const validDateUtc = new Date(Date.UTC(year, month, day, hour, min));
       const validDateJst = new Date(validDateUtc.getTime());
       
       const diffMins = Math.round((validDateJst - now) / 60000);
-
-      // 過去15分以上前のデータはスライダーから除外
       if (diffMins < -15) return;
 
       const timeStr = `${String(validDateJst.getHours()).padStart(2,'0')}:${String(validDateJst.getMinutes()).padStart(2,'0')}`;
@@ -481,58 +474,37 @@ async function fetchJmaRadarTimestamps() {
     const slider = document.getElementById('radar-time-slider');
     if (slider && js_urls.length > 0) {
       slider.max = js_urls.length - 1;
-      
       const currentIndex = js_labels.findIndex(label => label.includes("現在"));
       slider.value = currentIndex !== -1 ? currentIndex : 0;
-      
       const timeLabel = document.getElementById('time-label');
       if (timeLabel) timeLabel.textContent = js_labels[slider.value];
-      
       if (isRadarActive) updateRadarLayer();
     }
   } catch (e) {
-    console.error("雨雲データの取得に失敗しました。", e);
+    console.error("雨雲データの取得に失敗:", e);
   }
 }
 
 function updateRadarLayer() {
   const slider = document.getElementById('radar-time-slider');
-  
   if (radarLayer && typeof map !== 'undefined' && map.hasLayer(radarLayer)) {
     map.removeLayer(radarLayer);
   }
-  
   const url = js_urls[slider.value];
   if (!url) return;
-
-  // 💡 prca (1〜15時間先) はズーム上限を6にして自動引き伸ばしさせる
   const isPrca = url.includes('/prca/');
-  const maxZ = isPrca ? 6 : 10;
-
+  
   if (typeof map !== 'undefined') {
-    radarLayer = L.tileLayer(url, { 
-      opacity: 0.65, 
-      zIndex: 1500,
-      maxNativeZoom: maxZ
-    }).addTo(map);
+    radarLayer = L.tileLayer(url, { opacity: 0.65, zIndex: 1500, maxNativeZoom: isPrca ? 6 : 10 }).addTo(map);
   }
 }
 
-
-// 🚨 【セキュリティ強化：自動再生ブロック解除対応サイレン】
 async function playBearAlarm(event) {
-  if (event && typeof event.stopPropagation === 'function') {
-    event.stopPropagation();
-  }
-
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
   try {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     const audioCtx = new AudioContextClass();
-    
-    if (audioCtx.state === 'suspended') {
-      await audioCtx.resume();
-    }
-    
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
     const now = audioCtx.currentTime;
     const duration = 10.0; 
     
@@ -542,16 +514,12 @@ async function playBearAlarm(event) {
     masterGain.gain.setValueAtTime(1.5, now + duration - 0.5);
     masterGain.gain.linearRampToValueAtTime(0.0, now + duration); 
     
-    const osc1 = audioCtx.createOscillator();
-    osc1.type = 'sawtooth'; 
-    
-    const osc2 = audioCtx.createOscillator();
-    osc2.type = 'triangle'; 
+    const osc1 = audioCtx.createOscillator(); osc1.type = 'sawtooth'; 
+    const osc2 = audioCtx.createOscillator(); osc2.type = 'triangle'; 
     
     for (let t = 0; t < duration; t += 0.05) {
       const lfo = Math.sin(t * (Math.PI * 2 / 1.5)); 
       const baseFreq = 800 + (lfo * 150); 
-      
       osc1.frequency.setValueAtTime(baseFreq, now + t);
       osc2.frequency.setValueAtTime(baseFreq + 4, now + t); 
     }
@@ -559,35 +527,21 @@ async function playBearAlarm(event) {
     const bufferSize = audioCtx.sampleRate * duration;
     const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
     const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = Math.random() * 2 - 1;
-    }
-    const noise = audioCtx.createBufferSource();
-    noise.buffer = buffer;
-    
-    const noiseGain = audioCtx.createGain();
-    noiseGain.gain.setValueAtTime(0.08, now); 
-    
+    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+    const noise = audioCtx.createBufferSource(); noise.buffer = buffer;
+    const noiseGain = audioCtx.createGain(); noiseGain.gain.setValueAtTime(0.08, now); 
     const osc1Gain = audioCtx.createGain(); osc1Gain.gain.setValueAtTime(0.6, now);
     const osc2Gain = audioCtx.createGain(); osc2Gain.gain.setValueAtTime(0.5, now);
     
     osc1.connect(osc1Gain); osc1Gain.connect(masterGain);
     osc2.connect(osc2Gain); osc2Gain.connect(masterGain);
     noise.connect(noiseGain); noiseGain.connect(masterGain);
-    
     masterGain.connect(audioCtx.destination);
     
-    osc1.start(now);
-    osc2.start(now);
-    noise.start(now);
-    
-    osc1.stop(now + duration);
-    osc2.stop(now + duration);
-    noise.stop(now + duration);
-
+    osc1.start(now); osc2.start(now); noise.start(now);
+    osc1.stop(now + duration); osc2.stop(now + duration); noise.stop(now + duration);
   } catch(e) {
-    console.error("Audio Playback Error:", e);
-    alert("音声発信が制限されました。もう一度ボタンをしっかりとタップしてください。");
+    alert("音声発信が制限されました。もう一度ボタンをタップしてください。");
   }
 }
 
@@ -605,9 +559,7 @@ function initEvents() {
   const radarSlider = document.getElementById('radar-time-slider');
   if (radarSlider) {
     radarSlider.addEventListener('input', function() { 
-      if (js_labels && js_labels.length > 0) {
-        document.getElementById('time-label').textContent = js_labels[this.value]; 
-      }
+      if (js_labels && js_labels.length > 0) document.getElementById('time-label').textContent = js_labels[this.value]; 
     });
     radarSlider.addEventListener('change', function() { 
       if (isRadarActive) updateRadarLayer(); 
@@ -621,17 +573,13 @@ function initEvents() {
     btn.onclick = function() { 
       document.querySelectorAll('#type-filters .fbtn').forEach(b => b.className = 'fbtn'); 
       currentFilterType = this.getAttribute('data-t'); 
-      
       if (currentFilterType === 'all') this.classList.add('on');
       else if (currentFilterType === '目撃') this.classList.add('on-orange');
       else if (currentFilterType === '人身被害') this.classList.add('on-red');
-      
-      render(); 
-      updateAlertBanner(); 
+      render(); updateAlertBanner(); 
     }; 
   });
 }
-
 </script>
 </body>
 </html>
