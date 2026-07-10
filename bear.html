@@ -154,7 +154,7 @@ html, body {
 
 <div id="app" style="display:none;">
   <div class="header">
-    <h1>ベアウェザー：秋田県 天気＆安全対策 <span style="color:#fbbf24; font-size:12px;">【15時間レーダー強制補完版】</span></h1>
+    <h1>ベアウェザー：秋田県 天気＆安全対策 <span style="color:#fbbf24; font-size:12px;">【雨雲安定版】</span></h1>
     <div class="header-date" id="current-date">----年--月--日</div>
   </div>
   
@@ -408,82 +408,62 @@ function render() {
 }
 
 // ==========================================
-// 💡【強制補完版】APIが空でも15時間分のURLを生成する
+// 💡【究極安定版】確実な基準時間（basetime）を算出して404エラーを防ぐ
 // ==========================================
 async function fetchJmaRadarTimestamps() {
   try {
     const ts = Date.now();
-    const targetApis = [
-      { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}` },
-      { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_=${ts}` },
-      { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N3.json?_=${ts}` },
-      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N1.json?_=${ts}` },
-      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N2.json?_=${ts}` },
-      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes_N3.json?_=${ts}` },
-      { prod: "prca", element: "prca", url: `https://www.jma.go.jp/bosai/jmatile/data/prca/targetTimes.json?_=${ts}` }
-    ];
-
-    const responses = await Promise.all(targetApis.map(t => fetch(t.url).catch(() => null)));
-    let allTimes = {};
-    let basetimePrca = null; // 15時間予測用の基準時間
-
-    for (let i = 0; i < responses.length; i++) {
-      const res = responses[i];
-      if (!res || !res.ok) continue;
-      const data = await res.json();
-      if (!Array.isArray(data)) continue;
-
-      const prod = targetApis[i].prod;
-      const defaultElement = targetApis[i].element;
-
-      data.forEach(t => {
-        if (t.basetime && t.validtime) {
-          if (prod === "prca" && !basetimePrca) basetimePrca = t.basetime;
-          const existing = allTimes[t.validtime];
-          if (!existing || prod === "nowc") {
-            t.prod = prod;
-            t.element = t.elements ? t.elements[0] : defaultElement;
-            allTimes[t.validtime] = t;
-          }
-        }
+    // 1. 直近1時間までの詳細データ（nowc）を取得
+    const res = await fetch(`https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}`);
+    const data = await res.json();
+    
+    let sortedTimes = [];
+    data.forEach(t => {
+      if (t.basetime && t.validtime) {
+        sortedTimes.push({ 
+          basetime: t.basetime, 
+          validtime: t.validtime, 
+          prod: "nowc", 
+          element: t.elements ? t.elements[0] : "hrpns" 
+        });
+      }
+    });
+    
+    // 2. 1時間〜15時間先（prca）のURLを生成
+    // 気象庁のサーバー更新のラグ（毎時40分頃）を考慮し、必ず画像が存在する安全な「basetime」を算出
+    const nowUtc = new Date();
+    if (nowUtc.getUTCMinutes() < 40) {
+      nowUtc.setUTCHours(nowUtc.getUTCHours() - 1);
+    }
+    const bY = nowUtc.getUTCFullYear();
+    const bM = String(nowUtc.getUTCMonth() + 1).padStart(2, '0');
+    const bD = String(nowUtc.getUTCDate()).padStart(2, '0');
+    const bH = String(nowUtc.getUTCHours()).padStart(2, '0');
+    const safeBasetime = `${bY}${bM}${bD}${bH}0000`; // これが絶対に404にならない基準時間
+    
+    // 基準時間をもとに、15時間先までのURLを1時間刻みで作る
+    let baseDate = new Date(Date.UTC(bY, nowUtc.getUTCMonth(), nowUtc.getUTCDate(), nowUtc.getUTCHours(), 0, 0));
+    
+    for (let i = 1; i <= 15; i++) {
+      let vDate = new Date(baseDate.getTime() + i * 3600000); // 1時間ずつ足す
+      const vY = vDate.getUTCFullYear();
+      const vM = String(vDate.getUTCMonth() + 1).padStart(2, '0');
+      const vD = String(vDate.getUTCDate()).padStart(2, '0');
+      const vH = String(vDate.getUTCHours()).padStart(2, '0');
+      const vTime = `${vY}${vM}${vD}${vH}0000`;
+      
+      sortedTimes.push({ 
+        basetime: safeBasetime, 
+        validtime: vTime, 
+        prod: "prca", 
+        element: "prca" 
       });
     }
 
-    // ★もし15時間先のデータ(prca)がAPIからうまく取れなかった場合の強制補完
-    const keys = Object.keys(allTimes);
-    if (keys.length > 0 && basetimePrca) {
-      // 一番未来の時間（通常は1時間後）を取得
-      const lastKey = keys.sort().reverse()[0];
-      const year = parseInt(lastKey.substring(0,4));
-      const month = parseInt(lastKey.substring(4,6)) - 1;
-      const day = parseInt(lastKey.substring(6,8));
-      const hour = parseInt(lastKey.substring(8,10));
-      
-      let lastDate = new Date(Date.UTC(year, month, day, hour, 0));
-      
-      // 無理やり15時間先まで1時間刻みでデータを追加する
-      for (let i = 1; i <= 15; i++) {
-        lastDate.setUTCHours(lastDate.getUTCHours() + 1);
-        const y = lastDate.getUTCFullYear();
-        const m = String(lastDate.getUTCMonth() + 1).padStart(2, '0');
-        const d = String(lastDate.getUTCDate()).padStart(2, '0');
-        const h = String(lastDate.getUTCHours()).padStart(2, '0');
-        const vTime = `${y}${m}${d}${h}0000`;
-        
-        if (!allTimes[vTime]) {
-          allTimes[vTime] = {
-            basetime: basetimePrca,
-            validtime: vTime,
-            prod: "prca",
-            element: "prca"
-          };
-        }
-      }
-    }
-
-    let sortedTimes = Object.values(allTimes).sort((a, b) => a.validtime.localeCompare(b.validtime));
+    // 取得した時間を古い順に整理してURLリストに登録
+    sortedTimes.sort((a, b) => a.validtime.localeCompare(b.validtime));
+    
     const now = new Date();
-
     js_urls = [];
     js_labels = [];
 
@@ -514,6 +494,7 @@ async function fetchJmaRadarTimestamps() {
       }
     });
 
+    // スライダーの初期設定
     const slider = document.getElementById('radar-time-slider');
     if (slider && js_urls.length > 0) {
       slider.max = js_urls.length - 1;
@@ -538,13 +519,14 @@ function updateRadarLayer() {
   const url = js_urls[slider.value];
   if (!url) return;
 
-  const isLowRes = url.includes('/prca/') || url.includes('/fhrpns/');
+  // 1時間先〜15時間先（prca）のデータは気象庁側にズーム上限があるため6に制限（必須）
+  const isPrca = url.includes('/prca/');
   
   if (typeof map !== 'undefined') {
     radarLayer = L.tileLayer(url, { 
       opacity: 0.65, 
       zIndex: 1500, 
-      maxNativeZoom: isLowRes ? 6 : 10
+      maxNativeZoom: isPrca ? 6 : 10 // ここで画像を自動引き伸ばしして表示
     }).addTo(map);
   }
 }
@@ -595,6 +577,7 @@ async function playBearAlarm(event) {
   }
 }
 
+// 💡 修正箇所：スライダーを動かしている最中に雨雲を連動して切り替える
 function initEvents() {
   document.getElementById('btn-alarm').addEventListener('click', (e) => playBearAlarm(e));
   document.getElementById('btn-floating-alarm').addEventListener('click', (e) => playBearAlarm(e));
@@ -608,6 +591,7 @@ function initEvents() {
   
   const radarSlider = document.getElementById('radar-time-slider');
   if (radarSlider) {
+    // スライダーを動かしている最中 (input) に時間を書き換えつつ、雨雲も連動して切り替える
     radarSlider.addEventListener('input', function() { 
       if (js_labels && js_labels.length > 0) {
         document.getElementById('time-label').textContent = js_labels[this.value]; 
