@@ -44,11 +44,26 @@ html, body {
 
 .content-body { display: flex; flex-direction: row; flex: 1; width: 100%; height: 100%; position: relative; overflow: hidden; }
 
-/* サイドバー */
+/* サイドバーと折りたたみ機能のスタイル */
 .sidebar {
   width: 380px; min-width: 380px; background: #fff; border-right: 1px solid #e2e8f0;
   display: flex; flex-direction: column; height: 100%; flex-shrink: 0; z-index: 10;
+  position: relative; transition: transform 0.3s ease, margin-left 0.3s ease;
 }
+.sidebar.collapsed {
+  margin-left: -380px;
+}
+/* サイドバー開閉トグルボタン */
+.sidebar-toggle-btn {
+  position: absolute; top: 50%; right: -24px; transform: translateY(-50%);
+  width: 24px; height: 50px; background: #1e293b; color: #fff;
+  border: 1px solid #e2e8f0; border-left: none; border-radius: 0 8px 8px 0;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; z-index: 1100; box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+  padding: 0;
+}
+.sidebar-toggle-btn:hover { background: #334155; }
+
 .sidebar-scroll-wrapper { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
 
 .weather-advice { padding: 12px 15px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; font-size: 13px; line-height: 1.5; color: #334155; }
@@ -132,10 +147,16 @@ html, body {
 
 @media (max-width: 768px) {
   .content-body { flex-direction: column; }
-  .sidebar { width: 100%; min-width: 100%; height: 45%; border-bottom: 1px solid #cbd5e1; }
+  .sidebar { width: 100%; min-width: 100%; height: 45%; border-bottom: 1px solid #cbd5e1; transition: transform 0.3s ease, margin-top 0.3s ease; }
+  .sidebar.collapsed { margin-left: 0; margin-top: -45vh; transform: translateY(0); }
+  .sidebar-toggle-btn {
+    top: auto; bottom: -24px; left: 50%; right: auto; transform: translateX(-50%);
+    width: 60px; height: 24px; border-radius: 0 0 8px 8px; border-right: 1px solid #e2e8f0; border-top: none;
+  }
   .sidebar-scroll-wrapper { overflow-y: auto; }
   .list-scroll { overflow-y: visible; height: auto; flex: none; }
   #map { width: 100%; height: 55%; }
+  #map.expanded { height: 100%; }
   .map-control-overlay { top: 10px; left: 10px; width: 150px; padding: 6px; }
   .map-ctrl-btn { padding: 8px; font-size: 11px; margin-bottom: 4px; }
   .floating-bell-btn { bottom: 20px; right: 20px; width: 55px; height: 55px; font-size: 24px; }
@@ -168,7 +189,9 @@ html, body {
     </div>
     
     <div class="content-body">
-      <div class="sidebar">
+      <!-- サイドバー部（トグルボタンを追加） -->
+      <div class="sidebar" id="sidebar">
+        <button class="sidebar-toggle-btn" id="sidebar-toggle" title="メニューを開閉">◀</button>
         <div class="sidebar-scroll-wrapper">
           <div class="weather-advice">
             <h3>💡 本日の気象連動アドバイス</h3>
@@ -182,7 +205,7 @@ html, body {
           
           <div class="filter-box">
             <div id="type-filters">
-              <div class="fbtn on" data-t="all">🔵 すべての状況</div>
+              <div class="fbtn on" data-t="all">🔵 すべて</div>
               <div class="fbtn" data-t="目撃">🟡 目撃・痕跡</div>
               <div class="fbtn" data-t="人身被害">🔴 人身被害</div>
             </div>
@@ -218,7 +241,6 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebas
 import { getFirestore, collection, onSnapshot, doc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { getMessaging, getToken } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging.js";
 
-// Firebaseの設定（ご自身のものに書き換えてください）
 const firebaseConfig = {
   apiKey: "YOUR_API_KEY",
   authDomain: "YOUR_AUTH_DOMAIN",
@@ -232,7 +254,6 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const messaging = getMessaging(app);
 
-// WEBプッシュの「VAPID鍵」
 const VAPID_KEY = "YOUR_PUBLIC_VAPID_KEY"; 
 
 let CSV_DATA = [];
@@ -244,7 +265,6 @@ let isRadarActive = false;
 let isBearActive = true;
 let lastWeatherCache = null;
 
-// 自動追跡監視用のIDと初期位置フラグ
 let watchId = null;
 let isFirstLocation = true;
 
@@ -256,41 +276,58 @@ window.addEventListener('DOMContentLoaded', () => {
   fetchJmaRadarTimestamps();
   loadOpenMeteoForecast();
   syncFirebaseData();
-  startLocationTracking(); // 起動直後から位置のトラッキングを自動スタート
-  
+  startLocationTracking();
   setupPushNotification();
+  setupSidebarToggle(); // 開閉機能の初期化を追加
 });
 
-// プッシュ通知設定とデバイストークンの登録処理
+// サイドバー開閉ロジック
+function setupSidebarToggle() {
+  const sidebar = document.getElementById('sidebar');
+  const toggleBtn = document.getElementById('sidebar-toggle');
+  const mapEl = document.getElementById('map');
+  
+  toggleBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isCollapsed = sidebar.classList.toggle('collapsed');
+    
+    // パソコン画面とスマホ画面で矢印の向きやマップ高さを変更
+    if (window.innerWidth > 768) {
+      toggleBtn.textContent = isCollapsed ? '▶' : '◀';
+    } else {
+      toggleBtn.textContent = isCollapsed ? '▼' : '▲';
+      if (isCollapsed) {
+        mapEl.classList.add('expanded');
+      } else {
+        mapEl.classList.remove('expanded');
+      }
+    }
+    
+    // 地図の表示サイズが変わるためLeafletに再計算させる
+    setTimeout(() => {
+      if (map) map.invalidateSize();
+    }, 350);
+  });
+}
+
 async function setupPushNotification() {
   if ('serviceWorker' in navigator && 'Notification' in window) {
     try {
       const registration = await navigator.serviceWorker.register('./firebase-messaging-sw.js', {
         scope: './'
       });
-      console.log('ServiceWorker の登録に成功しました:', registration);
-
       const permission = await Notification.requestPermission();
       if (permission === 'granted') {
-        console.log('通知の許可を得ました。');
-        
         const currentToken = await getToken(messaging, { 
           serviceWorkerRegistration: registration,
           vapidKey: VAPID_KEY 
         });
-
         if (currentToken) {
-          console.log('FCMトークンを取得しました。');
           await setDoc(doc(db, "fcm_tokens", currentToken), {
             createdAt: new Date(),
             device: navigator.userAgent
           });
-          console.log('トークンをFirestoreへ保存・更新しました。');
-        } else {
-          console.log('通知トークンを取得できませんでした。');
         }
-      } else {
-        console.warn('通知の許可が拒否されました。');
       }
     } catch (error) {
       console.error('プッシュ通知設定エラー:', error);
@@ -304,7 +341,6 @@ function initMap() {
   
   const baseTile = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', { attribution: '国土地理院' });
   
-  // 地図の初期化（グローバル変数mapに格納）
   map = L.map('map', { zoomControl: false, minZoom: 7, maxZoom: 18, layers: [baseTile] }).setView([39.65, 140.1], 8);
   L.control.zoom({ position: 'topright' }).addTo(map);
 
@@ -313,16 +349,18 @@ function initMap() {
 
   const mapUi = document.getElementById('map-ui');
   const floatAlarm = document.getElementById('btn-floating-alarm');
+  const toggleBtn = document.getElementById('sidebar-toggle');
   
   ['mousedown', 'touchstart', 'dblclick', 'wheel'].forEach(evt => {
     mapUi.addEventListener(evt, e => e.stopPropagation());
     floatAlarm.addEventListener(evt, e => e.stopPropagation());
+    toggleBtn.addEventListener(evt, e => e.stopPropagation());
   });
 
   initEvents();
 }
 
-// 自動位置追跡（watchPositionで常時監視。ユーザーが移動すると自動更新）
+// リアルタイム位置情報の追跡性能を強化
 function startLocationTracking() {
   if (navigator.geolocation) {
     if (watchId !== null) {
@@ -335,7 +373,6 @@ function startLocationTracking() {
         const lng = pos.coords.longitude;
         const accuracy = pos.coords.accuracy;
 
-        // 地図上に現在地表示がまだなければ移動、2回目以降はピンの位置更新だけ（操作の邪魔をしない）
         if (isFirstLocation) {
           if (map) {
             map.flyTo([lat, lng], 13);
@@ -343,35 +380,38 @@ function startLocationTracking() {
           isFirstLocation = false;
         }
 
+        // 既存のピンがあれば位置だけ滑らかに移動更新
         if (userMarker) {
           userMarker.setLatLng([lat, lng]);
           userMarker.setTooltipContent(`現在地 (精度: 約${Math.round(accuracy)}m)`);
+          // マーカーが他のピンの下に隠れないよう前面に固定
+          userMarker.bringToFront();
         } else if (map) {
           userMarker = L.circleMarker([lat, lng], {
-            radius: 8,
-            fillColor: '#2563eb', // 青色
+            radius: 9,
+            fillColor: '#2563eb',
             color: '#fff',
-            weight: 2,
-            fillOpacity: 0.9
+            weight: 3,
+            fillOpacity: 0.9,
+            zIndexOffset: 1000 // 常に最前面に配置
           }).addTo(map);
-          userMarker.bindTooltip("現在地", { permanent: false, direction: 'top' });
+          userMarker.bindTooltip(`現在地 (精度: 約${Math.round(accuracy)}m)`, { permanent: false, direction: 'top' });
         }
       },
       err => {
-        console.warn("位置情報の自動追跡に失敗しました:", err.message);
+        console.warn("位置情報の取得に失敗またはタイムアウトしました。再試行します:", err.message);
       },
       { 
-        enableHighAccuracy: true, // 高精度GPS情報を極力使用
+        enableHighAccuracy: true, 
         timeout: 10000, 
-        maximumAge: 0 
+        maximumAge: 2000 // 2秒以内のキャッシュなら利用してバッテリー消費を最適化しつつリアルタイム同期
       }
     );
   } else {
-    console.error("このブラウザはGeolocationに対応していません。");
+    console.error("Geolocation非対応ブラウザです。");
   }
 }
 
-// Firebaseからリアルタイムデータを同期
 function syncFirebaseData() {
   onSnapshot(collection(db, "bear_reports"), (snapshot) => {
     CSV_DATA = [];
@@ -380,14 +420,13 @@ function syncFirebaseData() {
       data.id = doc.id; 
       CSV_DATA.push(data);
     });
-    render(); // データを取得したら再描画
+    render(); 
     updateAlertBanner();
   }, (error) => {
     console.error("Firebaseの読み込みエラー: ", error);
   });
 }
 
-// 気象情報の取得
 function loadOpenMeteoForecast() {
   fetch(`https://api.open-meteo.com/v1/forecast?latitude=39.7186&longitude=140.1023&current_weather=true&hourly=temperature_2m,weathercode,precipitation_probability&timezone=Asia%2FTokyo`)
     .then(res => res.json())
@@ -421,7 +460,6 @@ function loadOpenMeteoForecast() {
     .catch(err => console.error("天気情報の取得に失敗しました:", err));
 }
 
-// アラート表示とアドバイスの切り替え
 function updateAlertBanner() {
   const alertBar = document.getElementById('alert-bar');
   const titleEl = document.getElementById('alert-title');
@@ -457,7 +495,6 @@ function updateAlertBanner() {
   }
 }
 
-// 📌 【最重要】サイドバーのリスト描画 & マップピン描画処理
 function render() {
   if (!map) return;
   markers.clearLayers();
@@ -466,10 +503,8 @@ function render() {
   listEl.innerHTML = '';
   let count = 0;
 
-  // 全目撃データをループ処理
   CSV_DATA.forEach(d => {
     const type = d["情報種別"] || "";
-    // フィルターに合致しない場合はスキップ
     if (currentFilterType !== 'all') {
       if (currentFilterType === '目撃' && !type.includes('目撃') && !type.includes('痕跡')) return;
       if (currentFilterType === '人身被害' && !type.includes('人身')) return;
@@ -480,7 +515,6 @@ function render() {
     const lat = parseFloat(d["緯度"]); 
     const lng = parseFloat(d["経度"]);
     
-    // 1. マップ上にピンを追加
     if (!isNaN(lat) && !isNaN(lng)) {
       const col = (type.includes('人身') || type.includes('被害')) ? '#dc2626' : '#ea580c';
       const m = L.circleMarker([lat, lng], { 
@@ -494,18 +528,15 @@ function render() {
       markers.addLayer(m);
     }
 
-    // 2. サイドバー用のHTML要素を作成して追加
     const item = document.createElement('div');
     item.className = 'sitem';
     
-    // リストクリック時にその場所にマップ移動する挙動
     item.onclick = () => {
       if (!isNaN(lat) && !isNaN(lng)) {
         map.setView([lat, lng], 14);
       }
     };
     
-    // 安全に表示用のタグ名を設定
     let tagClass = 'tag-目撃';
     let cleanType = '目撃・痕跡';
     if (type.includes('人身') || type.includes('被害')) {
@@ -523,11 +554,9 @@ function render() {
     listEl.appendChild(item);
   });
   
-  // 件数をサイドバーに反映
   document.getElementById('list-count').textContent = `${count} 件の情報`;
 }
 
-// 気象庁雨雲レーダーのタイムスタンプ情報取得
 async function fetchJmaRadarTimestamps() {
   try {
     const ts = Date.now();
@@ -622,10 +651,8 @@ async function fetchJmaRadarTimestamps() {
   }
 }
 
-// レーダータイルの更新表示
 function updateRadarLayer() {
   const slider = document.getElementById('radar-time-slider');
-  
   if (radarLayer && typeof map !== 'undefined' && map.hasLayer(radarLayer)) {
     map.removeLayer(radarLayer);
   }
@@ -645,7 +672,6 @@ function updateRadarLayer() {
   }
 }
 
-// クマ撃退疑似電子ホイッスル
 async function playBearAlarm(event) {
   if (event && typeof event.stopPropagation === 'function') {
     event.stopPropagation();
@@ -717,7 +743,6 @@ async function playBearAlarm(event) {
   }
 }
 
-// 各種操作イベントの紐付け
 function initEvents() {
   document.getElementById('btn-alarm').addEventListener('click', (e) => playBearAlarm(e));
   document.getElementById('btn-floating-alarm').addEventListener('click', (e) => playBearAlarm(e));
@@ -743,7 +768,6 @@ function initEvents() {
 
   document.getElementById('btn-bear-toggle').onclick = function() { isBearActive = !isBearActive; if (isBearActive) { this.style.background = '#1e293b'; this.textContent = '🐻 熊マーカーを隠す'; map.addLayer(markers); } else { this.style.background = '#64748b'; this.textContent = '🐻 熊マーカーを表示'; map.removeLayer(markers); } };
   
-  // フィルターボタンのアクション設定
   document.querySelectorAll('#type-filters .fbtn').forEach(btn => { 
     btn.onclick = function() { 
       document.querySelectorAll('#type-filters .fbtn').forEach(b => b.className = 'fbtn'); 
