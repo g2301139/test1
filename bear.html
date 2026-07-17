@@ -393,14 +393,30 @@ function render() {
   document.getElementById('list-count').textContent = `${count} 件の情報`;
 }
 
-// ==========================================
-// 💡【核心の修正】不安定なJSONを排除し、
-// ナウキャストから15時間先の時間・URLを強制自動生成するロジック
-// ==========================================
+// 💡 修正ポイント
+// 1. 短時間予報（15時間先まで）の要素名を `prcp` に修正
+// 2. 「0時間後」などの不自然な表記をなくし、時間を適切にフォーマット
+function formatTimeDiff(diffMins, timeStr) {
+  if (diffMins < -15) {
+    return `${Math.abs(diffMins)}分前 (${timeStr})`;
+  } else if (diffMins <= 5 && diffMins >= -15) {
+    return `現在 (${timeStr})`;
+  } else if (diffMins > 5 && diffMins < 60) {
+    return `${diffMins}分後 (${timeStr})`;
+  } else {
+    const hours = Math.floor(diffMins / 60);
+    const mins = diffMins % 60;
+    if (mins === 0) {
+      return `${hours}時間後 (${timeStr})`;
+    } else {
+      return `${hours}時間${mins}分後 (${timeStr})`;
+    }
+  }
+}
+
 async function fetchJmaRadarTimestamps() {
   try {
     const ts = Date.now();
-    // 確実に稼働しているナウキャストのタイムスタンプのみをフェッチ
     const res = await fetch(`https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}`);
     if (!res.ok) throw new Error("ナウキャストインデックス取得失敗");
     const nowcData = await res.json();
@@ -414,7 +430,7 @@ async function fetchJmaRadarTimestamps() {
     const now = new Date();
     const pad = (n) => String(n).padStart(2, '0');
 
-    // 1. まずナウキャストデータ（直近〜1時間先まで）を配列にセット
+    // 1. ナウキャストデータ（直近〜1時間先まで）
     nowcData.forEach(t => {
       if (!t.basetime || !t.validtime) return;
       
@@ -424,27 +440,22 @@ async function fetchJmaRadarTimestamps() {
       const hour = parseInt(t.validtime.substring(8,10));
       const min = parseInt(t.validtime.substring(10,12));
       
-      // 気象庁の時刻はUTCなので、絶対時間としてDateオブジェクト化
       const validDateJst = new Date(Date.UTC(year, month, day, hour, min));
       const diffMins = Math.round((validDateJst - now) / 60000);
       
-      if (diffMins < -30) return; // 30分以上前の過去データはスキップ
+      if (diffMins < -30) return; 
 
       const timeStr = `${pad(validDateJst.getHours())}:${pad(validDateJst.getMinutes())}`;
       
       js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/nowc/${t.basetime}/none/${t.validtime}/surf/hrpns/{z}/{x}/{y}.png`);
       js_dates.push(validDateJst);
       js_prods.push("nowc");
-
-      if (diffMins <= 5 && diffMins >= -15) js_labels.push(`現在 (${timeStr})`);
-      else if (diffMins > 5 && diffMins < 60) js_labels.push(`${diffMins}分後 (${timeStr})`);
-      else if (diffMins < -15) js_labels.push(`${Math.abs(diffMins)}分前 (${timeStr})`);
-      else js_labels.push(`1時間後 (${timeStr})`);
+      js_labels.push(formatTimeDiff(diffMins, timeStr));
     });
 
-    // 2. ナウキャストの最終データから、未来15時間分の「降水短時間予報」を強制生成
+    // 2. 降水短時間予報（1時間後〜15時間後まで）
     const latestNowc = nowcData[nowcData.length - 1];
-    const nBaseStr = latestNowc.basetime; // UTC文字列 (例: "20260717003000")
+    const nBaseStr = latestNowc.basetime;
     
     const nbYear = parseInt(nBaseStr.substring(0,4));
     const nbMonth = parseInt(nBaseStr.substring(4,6)) - 1;
@@ -452,38 +463,32 @@ async function fetchJmaRadarTimestamps() {
     const nbHour = parseInt(nBaseStr.substring(8,10));
     const nbMin = parseInt(nBaseStr.substring(10,12));
 
-    // 短時間予報の配信遅れ対策：ナウキャストのベース分が30分未満なら安全に1時間前の予報を使う
     let fbHour = nbHour;
     if (nbMin < 30) { fbHour = nbHour - 1; }
     
-    // 短時間予報の固定ベースタイム（UTCオブジェクト）を生成
     let fhrpnsBaseDate = new Date(Date.UTC(nbYear, nbMonth, nbDay, fbHour, 0, 0));
     const fhrpnsBasetime = `${fhrpnsBaseDate.getUTCFullYear()}${pad(fhrpnsBaseDate.getUTCMonth()+1)}${pad(fhrpnsBaseDate.getUTCDate())}${pad(fhrpnsBaseDate.getUTCHours())}0000`;
 
-    // ナウキャストの直後の正時（00分）を未来予測の起点にする
     const lastValid = js_dates[js_dates.length - 1];
     let startPredDate = new Date(lastValid.getTime());
     startPredDate.setMinutes(0);
     startPredDate.setSeconds(0);
     
-    // 1時間刻みで15時間先までループ生成してドッキング
     for (let h = 1; h <= 15; h++) {
       let predDate = new Date(startPredDate.getTime() + (h * 3600000));
       
-      // 気象庁URL用の未来予測時刻（UTC文字列）を作成
       const fhrpnsValidtime = `${predDate.getUTCFullYear()}${pad(predDate.getUTCMonth()+1)}${pad(predDate.getUTCDate())}${pad(predDate.getUTCHours())}0000`;
       
       const timeStr = `${pad(predDate.getHours())}:${pad(predDate.getMinutes())}`;
-      const diffHours = Math.round((predDate - now) / 3600000);
+      const diffMins = Math.round((predDate - now) / 60000);
 
-      // 短時間予報の要素名は prcp ではなくナウキャスト共通の hrpns が正解
-      js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/fhrpns/${fhrpnsBasetime}/none/${fhrpnsValidtime}/surf/hrpns/{z}/{x}/{y}.png`);
+      // 💡 要素名を `prcp` に修正
+      js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/fhrpns/${fhrpnsBasetime}/none/${fhrpnsValidtime}/surf/prcp/{z}/{x}/{y}.png`);
       js_dates.push(predDate);
       js_prods.push("fhrpns");
-      js_labels.push(`${diffHours}時間後 (${timeStr})`);
+      js_labels.push(formatTimeDiff(diffMins, timeStr));
     }
 
-    // スライダーへ上限を設定して現在値に合わせる
     const slider = document.getElementById('radar-time-slider');
     if (slider && js_urls.length > 0) {
       slider.max = js_urls.length - 1;
@@ -500,7 +505,6 @@ async function fetchJmaRadarTimestamps() {
   }
 }
 
-// スライダーと天気予報の同期計算バグ（JST/UTCの9時間ズレ）を修正
 function updateSyncWeather(index) {
   const syncInfoEl = document.getElementById('slider-sync-info');
   if (!js_dates[index] || !hourlyWeatherData) {
@@ -511,7 +515,6 @@ function updateSyncWeather(index) {
   const targetDate = js_dates[index];
   const pad = (n) => String(n).padStart(2, '0');
   
-  // toISOString()を使わず、日本時間（JST）のままOpen-Meteoのフォーマット文字列に変換
   const targetIsoStr = `${targetDate.getFullYear()}-${pad(targetDate.getMonth()+1)}-${pad(targetDate.getDate())}T${pad(targetDate.getHours())}:00`; 
   
   let matchIndex = hourlyWeatherData.time.findIndex(t => t.includes(targetIsoStr));
@@ -543,7 +546,6 @@ function updateRadarLayer() {
   const prod = js_prods[slider.value];
   if (!url) return;
 
-  // 短時間予報（fhrpns）は元データの最大ズーム6までしか存在しないため、Leaflet側で最大18まで強制引き伸ばし拡大許可を設定
   let maxZoom = (prod === 'fhrpns') ? 6 : 10;
   let fallbackImage = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
   
