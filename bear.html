@@ -119,7 +119,7 @@ html, body {
 }
 .slider-w-pop { color: #dc2626; font-size: 13px; }
 
-/* 右下に浮かぶ丸い緊急ボタン */
+/* 緊急ボタン */
 .floating-bell-btn {
   position: absolute; bottom: 25px; right: 25px; z-index: 2500;
   width: 65px; height: 65px; background: linear-gradient(135deg, #ff4b4b 0%, #c1121f 100%);
@@ -127,9 +127,7 @@ html, body {
   font-size: 28px; cursor: pointer; display: flex; align-items: center; justify-content: center;
   box-shadow: 0 4px 12px rgba(0,0,0,0.35); transition: transform 0.1s ease, box-shadow 0.1s ease;
 }
-.floating-bell-btn:active {
-  transform: scale(0.92); box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-}
+.floating-bell-btn:active { transform: scale(0.92); box-shadow: 0 2px 6px rgba(0,0,0,0.3); }
 
 #loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #fff; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: bold; }
 .loading-text { font-size: 18px; margin-bottom: 10px; }
@@ -151,7 +149,7 @@ html, body {
 
 <div id="loading">
   <div class="loading-text">クラウドデータベースと同期中...</div>
-  <div class="loading-sub">【アップデート読込中...】</div>
+  <div class="loading-sub">【タイムライン強制生成アップデート適用中】</div>
 </div>
 
 <div id="app" style="display:none;">
@@ -396,99 +394,96 @@ function render() {
 }
 
 // ==========================================
-// 💡【修正完了】15時間予報のJSONエラー対策を追加
-// 複数のファイル名（targetTimes.json, targetTimes_N1.json 等）を
-// 同時に総当りさせることで、確実に15時間分のデータを取得します。
+// 💡【核心の修正】不安定なJSONを排除し、
+// ナウキャストから15時間先の時間・URLを強制自動生成するロジック
 // ==========================================
 async function fetchJmaRadarTimestamps() {
   try {
     const ts = Date.now();
-    
-    const targetApis = [
-      // ナウキャスト（1時間先まで / 5分更新）
-      { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}` },
-      { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_=${ts}` },
-      { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N3.json?_=${ts}` },
-      
-      // 降水短時間予報（15時間先まで / 1時間更新）
-      // ※「targetTimes.json」を起点に、気象庁のサーバー上に存在する可能性のあるファイルをすべて叩き、404エラーをすり抜けます
-      { prod: "fhrpns", element: "prcp", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes.json?_=${ts}` },
-      { prod: "fhrpns", element: "prcp", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes_N1.json?_=${ts}` },
-      { prod: "fhrpns", element: "prcp", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes_N2.json?_=${ts}` }
-    ];
-
-    const responses = await Promise.all(targetApis.map(t => fetch(t.url).catch(() => null)));
-    let allTimes = {};
-    
-    const priority = { "nowc": 2, "fhrpns": 1 };
-    
-    for (let i = 0; i < responses.length; i++) {
-      const res = responses[i];
-      if (!res || !res.ok) continue; // 404エラーの場合はここで安全にスキップされます
-      
-      const data = await res.json();
-      if (!Array.isArray(data)) continue;
-
-      const prod = targetApis[i].prod;
-      const element = targetApis[i].element;
-
-      data.forEach(t => {
-        if (t.basetime && t.validtime) {
-          const vTime = t.validtime;
-          const existing = allTimes[vTime];
-          
-          let shouldUpdate = false;
-          if (!existing) {
-            shouldUpdate = true;
-          } else if (priority[prod] > priority[existing.prod]) {
-            shouldUpdate = true;
-          }
-
-          if (shouldUpdate) {
-            allTimes[vTime] = { basetime: t.basetime, validtime: t.validtime, prod: prod, element: element };
-          }
-        }
-      });
-    }
-
-    let sortedTimes = Object.values(allTimes).sort((a, b) => a.validtime.localeCompare(b.validtime));
-    const now = new Date();
+    // 確実に稼働しているナウキャストのタイムスタンプのみをフェッチ
+    const res = await fetch(`https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}`);
+    if (!res.ok) throw new Error("ナウキャストインデックス取得失敗");
+    const nowcData = await res.json();
+    if (!Array.isArray(nowcData) || nowcData.length === 0) return;
 
     js_urls = [];
     js_labels = [];
     js_dates = [];
-    js_prods = []; 
+    js_prods = [];
 
-    sortedTimes.forEach((t) => {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+
+    // 1. まずナウキャストデータ（直近〜1時間先まで）を配列にセット
+    nowcData.forEach(t => {
+      if (!t.basetime || !t.validtime) return;
+      
       const year = parseInt(t.validtime.substring(0,4));
       const month = parseInt(t.validtime.substring(4,6)) - 1;
       const day = parseInt(t.validtime.substring(6,8));
       const hour = parseInt(t.validtime.substring(8,10));
       const min = parseInt(t.validtime.substring(10,12));
-      const validDateUtc = new Date(Date.UTC(year, month, day, hour, min));
-      const validDateJst = new Date(validDateUtc.getTime());
       
+      // 気象庁の時刻はUTCなので、絶対時間としてDateオブジェクト化
+      const validDateJst = new Date(Date.UTC(year, month, day, hour, min));
       const diffMins = Math.round((validDateJst - now) / 60000);
       
-      if (diffMins < -30 || diffMins > 960) return;
+      if (diffMins < -30) return; // 30分以上前の過去データはスキップ
 
-      const timeStr = `${String(validDateJst.getHours()).padStart(2,'0')}:${String(validDateJst.getMinutes()).padStart(2,'0')}`;
+      const timeStr = `${pad(validDateJst.getHours())}:${pad(validDateJst.getMinutes())}`;
       
-      js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/${t.prod}/${t.basetime}/none/${t.validtime}/surf/${t.element}/{z}/{x}/{y}.png`);
+      js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/nowc/${t.basetime}/none/${t.validtime}/surf/hrpns/{z}/{x}/{y}.png`);
       js_dates.push(validDateJst);
-      js_prods.push(t.prod); 
-      
+      js_prods.push("nowc");
+
       if (diffMins <= 5 && diffMins >= -15) js_labels.push(`現在 (${timeStr})`);
       else if (diffMins > 5 && diffMins < 60) js_labels.push(`${diffMins}分後 (${timeStr})`);
       else if (diffMins < -15) js_labels.push(`${Math.abs(diffMins)}分前 (${timeStr})`);
-      else {
-        const hDiff = Math.floor(diffMins / 60);
-        const mDiff = diffMins % 60;
-        if (mDiff === 0) js_labels.push(`${hDiff}時間後 (${timeStr})`);
-        else js_labels.push(`${hDiff}時間${mDiff}分後 (${timeStr})`);
-      }
+      else js_labels.push(`1時間後 (${timeStr})`);
     });
 
+    // 2. ナウキャストの最終データから、未来15時間分の「降水短時間予報」を強制生成
+    const latestNowc = nowcData[nowcData.length - 1];
+    const nBaseStr = latestNowc.basetime; // UTC文字列 (例: "20260717003000")
+    
+    const nbYear = parseInt(nBaseStr.substring(0,4));
+    const nbMonth = parseInt(nBaseStr.substring(4,6)) - 1;
+    const nbDay = parseInt(nBaseStr.substring(6,8));
+    const nbHour = parseInt(nBaseStr.substring(8,10));
+    const nbMin = parseInt(nBaseStr.substring(10,12));
+
+    // 短時間予報の配信遅れ対策：ナウキャストのベース分が30分未満なら安全に1時間前の予報を使う
+    let fbHour = nbHour;
+    if (nbMin < 30) { fbHour = nbHour - 1; }
+    
+    // 短時間予報の固定ベースタイム（UTCオブジェクト）を生成
+    let fhrpnsBaseDate = new Date(Date.UTC(nbYear, nbMonth, nbDay, fbHour, 0, 0));
+    const fhrpnsBasetime = `${fhrpnsBaseDate.getUTCFullYear()}${pad(fhrpnsBaseDate.getUTCMonth()+1)}${pad(fhrpnsBaseDate.getUTCDate())}${pad(fhrpnsBaseDate.getUTCHours())}0000`;
+
+    // ナウキャストの直後の正時（00分）を未来予測の起点にする
+    const lastValid = js_dates[js_dates.length - 1];
+    let startPredDate = new Date(lastValid.getTime());
+    startPredDate.setMinutes(0);
+    startPredDate.setSeconds(0);
+    
+    // 1時間刻みで15時間先までループ生成してドッキング
+    for (let h = 1; h <= 15; h++) {
+      let predDate = new Date(startPredDate.getTime() + (h * 3600000));
+      
+      // 気象庁URL用の未来予測時刻（UTC文字列）を作成
+      const fhrpnsValidtime = `${predDate.getUTCFullYear()}${pad(predDate.getUTCMonth()+1)}${pad(predDate.getUTCDate())}${pad(predDate.getUTCHours())}0000`;
+      
+      const timeStr = `${pad(predDate.getHours())}:${pad(predDate.getMinutes())}`;
+      const diffHours = Math.round((predDate - now) / 3600000);
+
+      // 短時間予報の要素名は prcp ではなくナウキャスト共通の hrpns が正解
+      js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/fhrpns/${fhrpnsBasetime}/none/${fhrpnsValidtime}/surf/hrpns/{z}/{x}/{y}.png`);
+      js_dates.push(predDate);
+      js_prods.push("fhrpns");
+      js_labels.push(`${diffHours}時間後 (${timeStr})`);
+    }
+
+    // スライダーへ上限を設定して現在値に合わせる
     const slider = document.getElementById('radar-time-slider');
     if (slider && js_urls.length > 0) {
       slider.max = js_urls.length - 1;
@@ -501,10 +496,11 @@ async function fetchJmaRadarTimestamps() {
       if (isRadarActive) updateRadarLayer();
     }
   } catch (e) {
-    console.error("雨雲データの取得に失敗:", e);
+    console.error("雨雲タイムラインの自動生成に失敗しました:", e);
   }
 }
 
+// スライダーと天気予報の同期計算バグ（JST/UTCの9時間ズレ）を修正
 function updateSyncWeather(index) {
   const syncInfoEl = document.getElementById('slider-sync-info');
   if (!js_dates[index] || !hourlyWeatherData) {
@@ -513,7 +509,10 @@ function updateSyncWeather(index) {
   }
   
   const targetDate = js_dates[index];
-  const targetIsoStr = targetDate.toISOString().substring(0,13) + ":00"; 
+  const pad = (n) => String(n).padStart(2, '0');
+  
+  // toISOString()を使わず、日本時間（JST）のままOpen-Meteoのフォーマット文字列に変換
+  const targetIsoStr = `${targetDate.getFullYear()}-${pad(targetDate.getMonth()+1)}-${pad(targetDate.getDate())}T${pad(targetDate.getHours())}:00`; 
   
   let matchIndex = hourlyWeatherData.time.findIndex(t => t.includes(targetIsoStr));
   if (matchIndex === -1) matchIndex = 0; 
@@ -544,9 +543,8 @@ function updateRadarLayer() {
   const prod = js_prods[slider.value];
   if (!url) return;
 
-  // 15時間予報（fhrpns）は最大ズーム6として引き伸ばして表示する
+  // 短時間予報（fhrpns）は元データの最大ズーム6までしか存在しないため、Leaflet側で最大18まで強制引き伸ばし拡大許可を設定
   let maxZoom = (prod === 'fhrpns') ? 6 : 10;
-  
   let fallbackImage = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
   
   if (typeof map !== 'undefined') {
@@ -619,9 +617,7 @@ function initEvents() {
         document.getElementById('time-label').textContent = js_labels[this.value];
         updateSyncWeather(this.value); 
       }
-      if (isRadarActive) {
-        updateRadarLayer(); 
-      }
+      if (isRadarActive) { updateRadarLayer(); }
     });
   }
 
