@@ -103,7 +103,7 @@ html, body {
 #btn-gps { background: #16a34a; }
 #btn-alarm { background: linear-gradient(135deg, #dc2626, #7f1d1d); box-shadow: 0 2px 4px rgba(0,0,0,0.15); }
 
-/* 雨雲レーダースライダー (Yahoo!天気風) */
+/* 雨雲レーダースライダー */
 .radar-ui-wrapper { 
   background: #ffffff; border-radius: 8px; padding: 12px; margin-top: 8px; 
   border: 2px solid #3b82f6; box-shadow: 0 4px 10px rgba(0,0,0,0.15); 
@@ -260,7 +260,7 @@ let app, db;
 try { 
   app = initializeApp(firebaseConfig); 
   db = getFirestore(app); 
-} catch(e) { console.log("Firebase not configured properly."); }
+} catch(e) { console.log("Firebase not configured properly. Using dummy data."); }
 
 // === 3. 初期化処理 ===
 window.addEventListener('DOMContentLoaded', () => {
@@ -288,6 +288,23 @@ window.addEventListener('DOMContentLoaded', () => {
     renderListAndMarkers();
   }
 });
+
+// === 3.5 共通エラー通知処理 ===
+function showErrorToast(message) {
+  const alertBar = document.getElementById('alert-bar');
+  const alertTitle = document.getElementById('alert-title');
+  const dynamicText = document.getElementById('dynamic-alert-text');
+  
+  // エラー用の目立つ色（ダークグレー）に変更
+  alertBar.style.background = 'linear-gradient(135deg, #475569 0%, #1e293b 100%)';
+  alertTitle.textContent = "⚠️ システム通知";
+  dynamicText.textContent = message;
+  
+  // 4秒後に元の熊アラート状態に戻す
+  setTimeout(() => {
+    renderListAndMarkers(); 
+  }, 4000);
+}
 
 // === 4. マップの初期化 ===
 function initMap() {
@@ -352,19 +369,26 @@ function renderListAndMarkers() {
   // アラートバナーの更新
   const alertBar = document.getElementById('alert-bar');
   const alertTitle = document.getElementById('alert-title');
+  const dynamicText = document.getElementById('dynamic-alert-text');
+  
   if (hasDanger) {
     alertBar.style.background = 'linear-gradient(135deg, #dc2626 0%, #991b1b 100%)';
     alertTitle.textContent = "警戒レベル：高（人身被害あり）";
+    dynamicText.textContent = "直近で人身被害が報告されています。十分警戒してください。";
   } else {
     alertBar.style.background = 'linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%)';
     alertTitle.textContent = "警戒レベル：通常";
+    dynamicText.textContent = "周囲の状況に注意して行動してください。";
   }
 }
 
-// === 6. 天気予報の取得 (Open-Meteo) ===
+// === 6. 天気予報の取得 (エラーハンドリング追加) ===
 function loadOpenMeteoForecast() {
   fetch(`https://api.open-meteo.com/v1/forecast?latitude=39.7186&longitude=140.1023&current_weather=true&hourly=temperature_2m,weathercode,precipitation_probability&timezone=Asia%2FTokyo`)
-    .then(res => res.json())
+    .then(res => {
+      if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
+      return res.json();
+    })
     .then(data => {
       if(!data || !data.current_weather) return;
       hourlyWeatherData = data.hourly; 
@@ -389,10 +413,17 @@ function loadOpenMeteoForecast() {
         tHtml += `<div class="forecast-item"><div class="forecast-time">${time}</div><div class="forecast-icon">${wIcon}</div><div class="forecast-temp">${temp}°C</div><div class="weather-details-mini"><div class="w-info-mini pop">☔${pop}%</div></div></div>`;
       }
       timeline.innerHTML = tHtml;
+    })
+    .catch(err => {
+      console.warn("Weather API Error:", err);
+      document.getElementById('weather-text').textContent = "取得エラー";
+      document.getElementById('weather-temp').textContent = "--°C";
+      document.getElementById('weather-timeline').innerHTML = '<div style="padding: 10px; font-size: 12px; color: #dc2626;">天気予報を取得できませんでした。電波状況を確認してください。</div>';
+      showErrorToast("天気予報の取得に失敗しました");
     });
 }
 
-// === 7. 雨雲レーダー予測の取得と生成（修正済みの完璧なロジック） ===
+// === 7. 雨雲レーダー予測の取得と生成 (15時間先明記＆エラーハンドリング) ===
 function formatTimeLabel(dateObj, diffMins) {
   const pad = n => String(n).padStart(2, '0');
   const hhmm = `${pad(dateObj.getHours())}:${pad(dateObj.getMinutes())}`;
@@ -406,12 +437,14 @@ function formatTimeLabel(dateObj, diffMins) {
 async function fetchJmaRadarTimestamps() {
   const ts = Date.now();
   const urls = [
-    `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}`,
-    `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_=${ts}`,
-    `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N3.json?_=${ts}`
+    `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}`, // 直近
+    `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_=${ts}`, // 数時間先
+    `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N3.json?_=${ts}`  // 最大15時間先
   ];
   
   let allTargets = [];
+  
+  // エラーが起きても可能な限り取得できたデータだけは活かす
   for (const url of urls) {
     try {
       const res = await fetch(url);
@@ -419,10 +452,22 @@ async function fetchJmaRadarTimestamps() {
         const data = await res.json();
         if (Array.isArray(data)) allTargets = allTargets.concat(data);
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn(`Failed to fetch radar data: ${url}`, e);
+    }
+  }
+
+  const syncInfo = document.getElementById('slider-sync-info');
+
+  if (allTargets.length === 0) {
+    syncInfo.textContent = "レーダー情報を取得できませんでした";
+    syncInfo.style.color = "#dc2626";
+    syncInfo.style.borderColor = "#f87171";
+    syncInfo.style.backgroundColor = "#fef2f2";
+    showErrorToast("雨雲レーダーのデータ取得に失敗しました");
+    return;
   }
   
-  // 時間順にソートして重複排除
   allTargets.sort((a, b) => a.validtime.localeCompare(b.validtime));
   const uniqueTargets = [];
   const seen = new Set();
@@ -438,13 +483,12 @@ async function fetchJmaRadarTimestamps() {
     const vDate = new Date(Date.UTC(parseInt(t.validtime.substring(0,4)), parseInt(t.validtime.substring(4,6)) - 1, parseInt(t.validtime.substring(6,8)), parseInt(t.validtime.substring(8,10)), parseInt(t.validtime.substring(10,12))));
     const diffMins = Math.round((vDate - now) / 60000);
     
-    if (diffMins < -60) return; // 1時間以上前のデータは除外
+    if (diffMins < -60) return; // 1時間以上前の過去データは不要
 
-    // 💡 フォルダ自動判定（1時間以降の hrpns_nd に対応）
     let element = "hrpns";
     if (t.elements && Array.isArray(t.elements)) {
-      if (t.elements.includes("hrpns_nd")) element = "hrpns_nd";
-      else if (t.elements.includes("hrpns")) element = "hrpns";
+      if (t.elements.includes("hrpns_nd")) element = "hrpns_nd"; // 1〜15時間先（降水短時間）
+      else if (t.elements.includes("hrpns")) element = "hrpns";  // 直近（ナウキャスト）
     }
     
     js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/nowc/${t.basetime}/none/${t.validtime}/surf/${element}/{z}/{x}/{y}.png`);
@@ -459,6 +503,9 @@ async function fetchJmaRadarTimestamps() {
   
   slider.value = closestIdx;
   document.getElementById('time-label').textContent = js_labels[closestIdx];
+  
+  // 15時間先までカバーしていることをUIに明示
+  syncInfo.textContent = `過去1時間 〜 最大15時間先までの予測 (${js_urls.length}コマ)`;
 }
 
 function updateRadarLayer() {
@@ -473,6 +520,12 @@ function updateRadarLayer() {
 let audioCtx = null;
 function playBearAlarm() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  
+  // ブラウザの自動再生ポリシー対策（ユーザーアクション時にresume）
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
   
@@ -534,21 +587,37 @@ function initEvents() {
     renderListAndMarkers();
   };
 
-  // GPS現在地
+  // GPS現在地 (エラー詳細化と高精度オプションの追加)
   document.getElementById('btn-gps').onclick = function() {
     if (navigator.geolocation) {
       this.textContent = '📍 取得中...';
-      navigator.geolocation.getCurrentPosition(pos => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        map.setView([lat, lng], 14);
-        if (userMarker) map.removeLayer(userMarker);
-        userMarker = L.circleMarker([lat, lng], { radius: 8, color: '#2563eb', fillColor: '#3b82f6', fillOpacity: 1 }).addTo(map);
-        this.textContent = '📍 現在地を取得';
-      }, err => {
-        alert('現在地を取得できませんでした。');
-        this.textContent = '📍 現在地を取得';
-      });
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          map.setView([lat, lng], 14);
+          if (userMarker) map.removeLayer(userMarker);
+          userMarker = L.circleMarker([lat, lng], { radius: 8, color: '#2563eb', fillColor: '#3b82f6', fillOpacity: 1 }).addTo(map);
+          this.textContent = '📍 現在地を取得';
+        }, 
+        err => {
+          console.warn("Geolocation Error:", err);
+          let errMsg = '現在地を取得できませんでした。';
+          if (err.code === 1) errMsg = '位置情報の利用が許可されていません。設定を確認してください。';
+          else if (err.code === 2) errMsg = '電波状況等により位置が特定できません。';
+          else if (err.code === 3) errMsg = '位置情報の取得がタイムアウトしました。';
+          
+          this.textContent = '📍 取得失敗';
+          showErrorToast(errMsg);
+          
+          // 3秒後にボタンのテキストを戻す
+          setTimeout(() => { this.textContent = '📍 現在地を取得'; }, 3000);
+        },
+        // 高精度取得オプション（山の近くなどで役立ちます）
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      );
+    } else {
+      showErrorToast("お使いのブラウザは位置情報に対応していません。");
     }
   };
 
