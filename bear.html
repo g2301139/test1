@@ -396,20 +396,28 @@ function render() {
 }
 
 // ==========================================
-// 💡【修正版】15時間先までのデータを正しく取得
+// 💡【修正版】15時間先までの降水短時間予報（fhrpns）を統合し確実に表示
 // ==========================================
 async function fetchJmaRadarTimestamps() {
   try {
     const ts = Date.now();
-    // 確実にデータが存在するナウキャスト（nowc）のみに絞り、N1〜N3を利用
+    
+    // nowc (ナウキャスト) : 高解像度・直近1時間
+    // fhrpns (降水短時間予報) : 1〜15時間先までカバー
     const targetApis = [
       { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}` },
       { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_=${ts}` },
-      { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N3.json?_=${ts}` }
+      { prod: "nowc", element: "hrpns", url: `https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N3.json?_=${ts}` },
+      { prod: "fhrpns", element: "prcp", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes_N1.json?_=${ts}` },
+      { prod: "fhrpns", element: "prcp", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes_N2.json?_=${ts}` },
+      { prod: "fhrpns", element: "prcp", url: `https://www.jma.go.jp/bosai/jmatile/data/fhrpns/targetTimes_N3.json?_=${ts}` }
     ];
 
     const responses = await Promise.all(targetApis.map(t => fetch(t.url).catch(() => null)));
     let allTimes = {};
+    
+    // データ優先度（時間が被った場合は高解像度なnowcを優先）
+    const priority = { "nowc": 2, "fhrpns": 1 };
     
     for (let i = 0; i < responses.length; i++) {
       const res = responses[i];
@@ -424,7 +432,16 @@ async function fetchJmaRadarTimestamps() {
       data.forEach(t => {
         if (t.basetime && t.validtime) {
           const vTime = t.validtime;
-          if (!allTimes[vTime]) {
+          const existing = allTimes[vTime];
+          
+          let shouldUpdate = false;
+          if (!existing) {
+            shouldUpdate = true;
+          } else if (priority[prod] > priority[existing.prod]) {
+            shouldUpdate = true;
+          }
+
+          if (shouldUpdate) {
             allTimes[vTime] = { basetime: t.basetime, validtime: t.validtime, prod: prod, element: element };
           }
         }
@@ -450,7 +467,7 @@ async function fetchJmaRadarTimestamps() {
       
       const diffMins = Math.round((validDateJst - now) / 60000);
       
-      // 過去30分〜16時間（960分）以内にフィルタリング
+      // 過去30分〜15時間（900分＋余裕）以内にフィルタリング
       if (diffMins < -30 || diffMins > 960) return;
 
       const timeStr = `${String(validDateJst.getHours()).padStart(2,'0')}:${String(validDateJst.getMinutes()).padStart(2,'0')}`;
@@ -522,16 +539,23 @@ function updateRadarLayer() {
   }
   
   const url = js_urls[slider.value];
+  const prod = js_prods[slider.value];
   if (!url) return;
 
-  // ズーム上限を10で統一
-  let maxZoom = 10;
+  // ⚠️ 404エラー回避のための最重要ポイント：
+  // 15時間予報（fhrpns）は気象庁側でズームレベル6までしか画像を作っていないため、
+  // Leafletに maxNativeZoom: 6 を指定し、それ以上のズームは画像を自動で引き伸ばして表示させる。
+  let maxZoom = (prod === 'fhrpns') ? 6 : 10;
+  
+  // 万が一画像が存在しない場合（404）は透明な画像を表示してマップを壊さない
+  let fallbackImage = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
   
   if (typeof map !== 'undefined') {
     radarLayer = L.tileLayer(url, { 
       opacity: 0.65, 
       zIndex: 1500, 
-      maxNativeZoom: maxZoom 
+      maxNativeZoom: maxZoom,
+      errorTileUrl: fallbackImage
     }).addTo(map);
   }
 }
