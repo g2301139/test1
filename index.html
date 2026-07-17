@@ -244,6 +244,10 @@ let isRadarActive = false;
 let isBearActive = true;
 let lastWeatherCache = null;
 
+// 自動追跡監視用のIDと初期位置フラグ
+let watchId = null;
+let isFirstLocation = true;
+
 window.addEventListener('DOMContentLoaded', () => {
   const now = new Date();
   document.getElementById('current-date').textContent = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日`;
@@ -252,7 +256,7 @@ window.addEventListener('DOMContentLoaded', () => {
   fetchJmaRadarTimestamps();
   loadOpenMeteoForecast();
   syncFirebaseData();
-  autoFetchLocation();
+  startLocationTracking(); // 起動時から常時追跡
   
   // プッシュ通知の初期設定を起動
   setupPushNotification();
@@ -322,21 +326,51 @@ function initMap() {
   initEvents();
 }
 
-function autoFetchLocation() {
+// 自動追跡機能（watchPositionを用いたリアルタイムトラッキング）
+function startLocationTracking() {
   if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
+    if (watchId !== null) {
+      navigator.geolocation.clearWatch(watchId);
+    }
+
+    watchId = navigator.geolocation.watchPosition(
       pos => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
-        map.flyTo([lat, lng], 13);
-        if (userMarker) map.removeLayer(userMarker);
-        userMarker = L.circleMarker([lat, lng], { radius: 8, fillColor: '#2563eb', color: '#fff', weight: 2 }).addTo(map).bindPopup("現在地").openPopup();
+        const accuracy = pos.coords.accuracy;
+
+        // 初回位置取得時のみ、ユーザーの現在地に地図の中心をスムーズに移動
+        if (isFirstLocation) {
+          map.flyTo([lat, lng], 13);
+          isFirstLocation = false;
+        }
+
+        // 既存の現在地マーカーがあれば更新、無ければ新規に円マーカーを設置
+        if (userMarker) {
+          userMarker.setLatLng([lat, lng]);
+          userMarker.setTooltipContent(`現在地 (誤差: 約${Math.round(accuracy)}m)`);
+        } else {
+          userMarker = L.circleMarker([lat, lng], {
+            radius: 8,
+            fillColor: '#2563eb', // 青色で表示
+            color: '#fff',
+            weight: 2,
+            fillOpacity: 0.9
+          }).addTo(map);
+          userMarker.bindTooltip("現在地", { permanent: false, direction: 'top' });
+        }
       },
       err => {
-        console.warn("自動位置情報取得が拒否されたか失敗しました:", err.message);
+        console.warn("位置情報の自動追跡に失敗または拒否されました:", err.message);
       },
-      { enableHighAccuracy: true, timeout: 5000 }
+      { 
+        enableHighAccuracy: true, // 高精度GPS等の情報を優先
+        timeout: 10000, 
+        maximumAge: 0 
+      }
     );
+  } else {
+    console.error("このブラウザはGeolocationに対応していません。");
   }
 }
 
