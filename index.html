@@ -88,8 +88,8 @@ html, body {
 .sitem-title { font-weight: bold; font-size: 13px; color: #1e293b; margin-bottom: 4px; }
 .sitem-meta { font-size: 11px; color: #64748b; }
 .type-tag { display: inline-block; font-size: 10px; padding: 2px 6px; border-radius: 3px; font-weight: bold; color: #fff; margin-top: 4px; }
-.tag-熊の目撃 { background: #64748b; }
-.tag-熊の人身被害 { background: #dc2626; }
+.tag-熊の目撃, .tag-目撃 { background: #ea580c; }
+.tag-熊の人身被害, .tag-人身被害 { background: #dc2626; }
 
 /* マップエリア */
 #map { flex: 1; height: 100%; width: 100%; background: #e5e9f0; position: relative; }
@@ -210,7 +210,7 @@ html, body {
   </div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
 
 <script type="module">
@@ -232,7 +232,7 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const messaging = getMessaging(app);
 
-// WEBプッシュの「VAPID鍵」（Firebaseの管理画面から取得して貼り付け）
+// WEBプッシュの「VAPID鍵」
 const VAPID_KEY = "YOUR_PUBLIC_VAPID_KEY"; 
 
 let CSV_DATA = [];
@@ -256,9 +256,8 @@ window.addEventListener('DOMContentLoaded', () => {
   fetchJmaRadarTimestamps();
   loadOpenMeteoForecast();
   syncFirebaseData();
-  startLocationTracking(); // 起動時から常時追跡
+  startLocationTracking(); // 起動直後から位置のトラッキングを自動スタート
   
-  // プッシュ通知の初期設定を起動
   setupPushNotification();
 });
 
@@ -266,19 +265,15 @@ window.addEventListener('DOMContentLoaded', () => {
 async function setupPushNotification() {
   if ('serviceWorker' in navigator && 'Notification' in window) {
     try {
-      // サービスワーカー（firebase-messaging-sw.js）を登録
-      // GitHub Pages等のサブディレクトリ運用を考慮し、相対パスでスコープを指定
       const registration = await navigator.serviceWorker.register('./firebase-messaging-sw.js', {
         scope: './'
       });
       console.log('ServiceWorker の登録に成功しました:', registration);
 
-      // 通知の許可リクエスト
       const permission = await Notification.requestPermission();
       if (permission === 'granted') {
         console.log('通知の許可を得ました。');
         
-        // トークン（端末の宛先）を取得
         const currentToken = await getToken(messaging, { 
           serviceWorkerRegistration: registration,
           vapidKey: VAPID_KEY 
@@ -286,7 +281,6 @@ async function setupPushNotification() {
 
         if (currentToken) {
           console.log('FCMトークンを取得しました。');
-          // Firestoreの「fcm_tokens」コレクションに端末情報を自動保存
           await setDoc(doc(db, "fcm_tokens", currentToken), {
             createdAt: new Date(),
             device: navigator.userAgent
@@ -309,6 +303,8 @@ function initMap() {
   document.getElementById('app').style.display = 'flex';
   
   const baseTile = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', { attribution: '国土地理院' });
+  
+  // 地図の初期化（グローバル変数mapに格納）
   map = L.map('map', { zoomControl: false, minZoom: 7, maxZoom: 18, layers: [baseTile] }).setView([39.65, 140.1], 8);
   L.control.zoom({ position: 'topright' }).addTo(map);
 
@@ -326,7 +322,7 @@ function initMap() {
   initEvents();
 }
 
-// 自動追跡機能（watchPositionを用いたリアルタイムトラッキング）
+// 自動位置追跡（watchPositionで常時監視。ユーザーが移動すると自動更新）
 function startLocationTracking() {
   if (navigator.geolocation) {
     if (watchId !== null) {
@@ -339,20 +335,21 @@ function startLocationTracking() {
         const lng = pos.coords.longitude;
         const accuracy = pos.coords.accuracy;
 
-        // 初回位置取得時のみ、ユーザーの現在地に地図の中心をスムーズに移動
+        // 地図上に現在地表示がまだなければ移動、2回目以降はピンの位置更新だけ（操作の邪魔をしない）
         if (isFirstLocation) {
-          map.flyTo([lat, lng], 13);
+          if (map) {
+            map.flyTo([lat, lng], 13);
+          }
           isFirstLocation = false;
         }
 
-        // 既存の現在地マーカーがあれば更新、無ければ新規に円マーカーを設置
         if (userMarker) {
           userMarker.setLatLng([lat, lng]);
-          userMarker.setTooltipContent(`現在地 (誤差: 約${Math.round(accuracy)}m)`);
-        } else {
+          userMarker.setTooltipContent(`現在地 (精度: 約${Math.round(accuracy)}m)`);
+        } else if (map) {
           userMarker = L.circleMarker([lat, lng], {
             radius: 8,
-            fillColor: '#2563eb', // 青色で表示
+            fillColor: '#2563eb', // 青色
             color: '#fff',
             weight: 2,
             fillOpacity: 0.9
@@ -361,10 +358,10 @@ function startLocationTracking() {
         }
       },
       err => {
-        console.warn("位置情報の自動追跡に失敗または拒否されました:", err.message);
+        console.warn("位置情報の自動追跡に失敗しました:", err.message);
       },
       { 
-        enableHighAccuracy: true, // 高精度GPS等の情報を優先
+        enableHighAccuracy: true, // 高精度GPS情報を極力使用
         timeout: 10000, 
         maximumAge: 0 
       }
@@ -374,6 +371,7 @@ function startLocationTracking() {
   }
 }
 
+// Firebaseからリアルタイムデータを同期
 function syncFirebaseData() {
   onSnapshot(collection(db, "bear_reports"), (snapshot) => {
     CSV_DATA = [];
@@ -382,13 +380,14 @@ function syncFirebaseData() {
       data.id = doc.id; 
       CSV_DATA.push(data);
     });
-    render();
+    render(); // データを取得したら再描画
     updateAlertBanner();
   }, (error) => {
     console.error("Firebaseの読み込みエラー: ", error);
   });
 }
 
+// 気象情報の取得
 function loadOpenMeteoForecast() {
   fetch(`https://api.open-meteo.com/v1/forecast?latitude=39.7186&longitude=140.1023&current_weather=true&hourly=temperature_2m,weathercode,precipitation_probability&timezone=Asia%2FTokyo`)
     .then(res => res.json())
@@ -422,6 +421,7 @@ function loadOpenMeteoForecast() {
     .catch(err => console.error("天気情報の取得に失敗しました:", err));
 }
 
+// アラート表示とアドバイスの切り替え
 function updateAlertBanner() {
   const alertBar = document.getElementById('alert-bar');
   const titleEl = document.getElementById('alert-title');
@@ -439,7 +439,7 @@ function updateAlertBanner() {
     descEl.textContent = "付近でクマ本体の目撃、あるいは新しい足跡やフンなどの痕跡が発見されています。";
     adviceEl.textContent = "🐾【警戒レベル中】クマが近くに潜んでいる可能性があります。朝夕の行動を避け、鈴やラジオなど音の出るものを必ず携帯してください。";
   } else {
-    const hasDanger = CSV_DATA.some(d => d["情報種別"] === "熊の人身被害");
+    const hasDanger = CSV_DATA.some(d => d["情報種別"] === "熊の人身被害" || d["情報種別"] === "人身被害");
     if (hasDanger) {
       alertBar.style.background = "linear-gradient(135deg, #7f1d1d 0%, #dc2626 100%)";
       titleEl.textContent = "🔴 🚨 クマ危険度【極めて高い・人身被害報告あり】";
@@ -457,40 +457,77 @@ function updateAlertBanner() {
   }
 }
 
+// 📌 【最重要】サイドバーのリスト描画 & マップピン描画処理
 function render() {
   if (!map) return;
   markers.clearLayers();
+  
   const listEl = document.getElementById('sightings-list');
   listEl.innerHTML = '';
   let count = 0;
 
+  // 全目撃データをループ処理
   CSV_DATA.forEach(d => {
-    const type = d["情報種別"];
-    if (currentFilterType !== 'all' && !type.includes(currentFilterType)) return;
+    const type = d["情報種別"] || "";
+    // フィルターに合致しない場合はスキップ
+    if (currentFilterType !== 'all') {
+      if (currentFilterType === '目撃' && !type.includes('目撃') && !type.includes('痕跡')) return;
+      if (currentFilterType === '人身被害' && !type.includes('人身')) return;
+    }
+    
     count++;
 
-    const lat = parseFloat(d["緯度"]); const lng = parseFloat(d["経度"]);
+    const lat = parseFloat(d["緯度"]); 
+    const lng = parseFloat(d["経度"]);
+    
+    // 1. マップ上にピンを追加
     if (!isNaN(lat) && !isNaN(lng)) {
-      const col = type.includes('人身') ? '#dc2626' : '#64748b';
-      const m = L.circleMarker([lat, lng], { radius: 9, fillColor: col, color: '#fff', weight: 2, fillOpacity: 0.8 });
-      m.bindPopup(`<b>${type}</b><br>${d["発生日時"]}<br>${d["地番情報"]}`);
+      const col = (type.includes('人身') || type.includes('被害')) ? '#dc2626' : '#ea580c';
+      const m = L.circleMarker([lat, lng], { 
+        radius: 9, 
+        fillColor: col, 
+        color: '#fff', 
+        weight: 2, 
+        fillOpacity: 0.8 
+      });
+      m.bindPopup(`<b>${type}</b><br>${d["発生日時"] || ''}<br>${d["地番情報"] || ''}`);
       markers.addLayer(m);
     }
 
+    // 2. サイドバー用のHTML要素を作成して追加
     const item = document.createElement('div');
     item.className = 'sitem';
+    
+    // リストクリック時にその場所にマップ移動する挙動
+    item.onclick = () => {
+      if (!isNaN(lat) && !isNaN(lng)) {
+        map.setView([lat, lng], 14);
+      }
+    };
+    
+    // 安全に表示用のタグ名を設定
+    let tagClass = 'tag-目撃';
+    let cleanType = '目撃・痕跡';
+    if (type.includes('人身') || type.includes('被害')) {
+      tagClass = 'tag-人身被害';
+      cleanType = '人身被害';
+    }
+
     item.innerHTML = `
-      <div class="sitem-content" onclick="map.setView([${lat},${lng}], 14)">
-        <div class="sitem-title">${d["地番情報"] || '秋田県内'}</div>
-        <div class="sitem-meta">${d["発生日時"]} | ${d["市町村"]}</div>
-        <span class="type-tag tag-${type}">${type}</span>
+      <div class="sitem-content">
+        <div class="sitem-title">${d["地番情報"] || d["市町村"] || '秋田県内'}</div>
+        <div class="sitem-meta">${d["発生日時"] || '不明'} | ${d["市町村"] || '詳細不明'}</div>
+        <span class="type-tag ${tagClass}">${cleanType}</span>
       </div>
     `;
     listEl.appendChild(item);
   });
+  
+  // 件数をサイドバーに反映
   document.getElementById('list-count').textContent = `${count} 件の情報`;
 }
 
+// 気象庁雨雲レーダーのタイムスタンプ情報取得
 async function fetchJmaRadarTimestamps() {
   try {
     const ts = Date.now();
@@ -585,6 +622,7 @@ async function fetchJmaRadarTimestamps() {
   }
 }
 
+// レーダータイルの更新表示
 function updateRadarLayer() {
   const slider = document.getElementById('radar-time-slider');
   
@@ -607,6 +645,7 @@ function updateRadarLayer() {
   }
 }
 
+// クマ撃退疑似電子ホイッスル
 async function playBearAlarm(event) {
   if (event && typeof event.stopPropagation === 'function') {
     event.stopPropagation();
@@ -678,6 +717,7 @@ async function playBearAlarm(event) {
   }
 }
 
+// 各種操作イベントの紐付け
 function initEvents() {
   document.getElementById('btn-alarm').addEventListener('click', (e) => playBearAlarm(e));
   document.getElementById('btn-floating-alarm').addEventListener('click', (e) => playBearAlarm(e));
@@ -703,6 +743,7 @@ function initEvents() {
 
   document.getElementById('btn-bear-toggle').onclick = function() { isBearActive = !isBearActive; if (isBearActive) { this.style.background = '#1e293b'; this.textContent = '🐻 熊マーカーを隠す'; map.addLayer(markers); } else { this.style.background = '#64748b'; this.textContent = '🐻 熊マーカーを表示'; map.removeLayer(markers); } };
   
+  // フィルターボタンのアクション設定
   document.querySelectorAll('#type-filters .fbtn').forEach(btn => { 
     btn.onclick = function() { 
       document.querySelectorAll('#type-filters .fbtn').forEach(b => b.className = 'fbtn'); 
