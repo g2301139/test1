@@ -18,7 +18,7 @@ html, body {
 #app { display: flex; flex-direction: column; height: 100vh; width: 100vw; position: relative; }
 .header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 20px; background: #1e293b; color: #fff; flex-shrink: 0; z-index: 1000;
+  padding: 10px 20px; background: #1e293b; color: #fff; flex-shrink: 0; z-index: 2000;
   box-shadow: 0 2px 5px rgba(0,0,0,0.2);
 }
 .header h1 { font-size: 16px; font-weight: bold; margin: 0; }
@@ -31,6 +31,7 @@ html, body {
   color: #fff; padding: 15px 20px; display: flex; gap: 15px; align-items: center;
   flex-shrink: 0; box-shadow: inset 0 -3px 6px rgba(0,0,0,0.15);
   transition: background 0.3s ease;
+  z-index: 10;
 }
 .w-card {
   display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.2);
@@ -44,10 +45,10 @@ html, body {
 
 .content-body { display: flex; flex-direction: row; flex: 1; width: 100%; height: 100%; position: relative; overflow: hidden; }
 
-/* サイドバーと折りたたみ機能のスタイル */
+/* サイドバーと折りたたみ機能のスタイル（PC版ベース） */
 .sidebar {
   width: 380px; min-width: 380px; background: #fff; border-right: 1px solid #e2e8f0;
-  display: flex; flex-direction: column; height: 100%; flex-shrink: 0; z-index: 10;
+  display: flex; flex-direction: column; height: 100%; flex-shrink: 0; z-index: 1000;
   position: relative; transition: transform 0.3s ease, margin-left 0.3s ease;
 }
 .sidebar.collapsed {
@@ -107,11 +108,11 @@ html, body {
 .tag-熊の人身被害, .tag-人身被害 { background: #dc2626; }
 
 /* マップエリア */
-#map { flex: 1; height: 100%; width: 100%; background: #e5e9f0; position: relative; }
+#map { flex: 1; height: 100%; width: 100%; background: #e5e9f0; position: relative; z-index: 1; }
 
 /* マップ上のメニュー開閉スタイル */
 .map-control-overlay {
-  position: absolute; top: 15px; left: 15px; z-index: 2000;
+  position: absolute; top: 15px; left: 15px; z-index: 500;
   background: rgba(255,255,255,0.95); padding: 12px; border-radius: 12px;
   border: 3px solid #1e293b; box-shadow: 0 4px 15px rgba(0,0,0,0.2); width: 220px;
   transition: height 0.3s ease;
@@ -150,7 +151,7 @@ html, body {
 
 /* 右下に浮かぶ丸い緊急ボタン */
 .floating-bell-btn {
-  position: absolute; bottom: 25px; right: 25px; z-index: 2500;
+  position: absolute; bottom: 25px; right: 25px; z-index: 500;
   width: 65px; height: 65px; background: linear-gradient(135deg, #ff4b4b 0%, #c1121f 100%);
   color: white; border: 3px solid #fff; border-radius: 50%;
   font-size: 28px; cursor: pointer; display: flex; align-items: center; justify-content: center;
@@ -162,21 +163,64 @@ html, body {
 
 #loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #fff; z-index: 9999; display: flex; align-items: center; justify-content: center; font-weight: bold; }
 
+/* 📱 スマホ用レイアウト（全画面マップ ＋ 下から引き出すパネル） */
 @media (max-width: 768px) {
-  .content-body { flex-direction: column; }
-  .sidebar { width: 100%; min-width: 100%; height: 45%; border-bottom: 1px solid #cbd5e1; transition: transform 0.3s ease, margin-top 0.3s ease; }
-  .sidebar.collapsed { margin-left: 0; margin-top: -45vh; transform: translateY(0); }
-  .sidebar-toggle-btn {
-    top: auto; bottom: -24px; left: 50%; right: auto; transform: translateX(-50%);
-    width: 60px; height: 24px; border-radius: 0 0 8px 8px; border-right: 1px solid #e2e8f0; border-top: none;
+  .content-body { display: block; position: relative; }
+  
+  /* スマホではマップを常に全画面にする */
+  #map { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+  
+  /* サイドバーを画面下からのボトムシート形式に変更 */
+  .sidebar { 
+    position: absolute; 
+    bottom: 0; 
+    left: 0; 
+    width: 100%; 
+    min-width: 100%; 
+    height: 70%; /* 引き出したときの高さ */
+    background: #fff;
+    border-top: 1px solid #cbd5e1; 
+    border-right: none;
+    border-radius: 20px 20px 0 0;
+    box-shadow: 0 -4px 15px rgba(0,0,0,0.15);
+    transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); 
+    margin: 0 !important; /* PCのマージンリセット */
+    z-index: 1000;
   }
-  .sidebar-scroll-wrapper { overflow-y: auto; }
+  
+  /* 閉じている時は下へ隠す */
+  .sidebar.collapsed { 
+    transform: translateY(100%); 
+  }
+  
+  /* パネルを引き出すためのタブ型ボタン（画面中央下部） */
+  .sidebar-toggle-btn {
+    top: -42px; 
+    bottom: auto;
+    left: 50%; 
+    right: auto; 
+    transform: translateX(-50%);
+    width: 140px; 
+    height: 42px; 
+    border-radius: 16px 16px 0 0; 
+    border: 1px solid #cbd5e1;
+    border-bottom: none;
+    background: #fff;
+    color: #1e293b;
+    box-shadow: 0 -4px 6px rgba(0,0,0,0.08);
+    font-size: 14px;
+    font-weight: bold;
+  }
+  
+  .sidebar-scroll-wrapper { overflow-y: auto; height: 100%; padding-bottom: 20px; }
   .list-scroll { overflow-y: visible; height: auto; flex: none; }
-  #map { width: 100%; height: 55%; }
-  #map.expanded { height: 100%; }
-  .map-control-overlay { top: 10px; left: 10px; width: 160px; padding: 10px; }
+  
+  /* 左上のマップメニュー（重ならないように調整） */
+  .map-control-overlay { top: 10px; left: 10px; width: 170px; padding: 10px; z-index: 500; }
   .map-ctrl-btn { padding: 8px; font-size: 11px; margin-bottom: 4px; }
-  .floating-bell-btn { bottom: 20px; right: 20px; width: 55px; height: 55px; font-size: 24px; }
+  
+  /* 緊急ボタンをタブに被らないよう少し上に配置 */
+  .floating-bell-btn { bottom: 65px; right: 15px; width: 55px; height: 55px; font-size: 24px; z-index: 500; }
 }
 </style>
 </head>
@@ -206,7 +250,7 @@ html, body {
     </div>
     
     <div class="content-body">
-      <!-- サイドバー部（トグルボタンを追加） -->
+      <!-- サイドバー部（スマホ時は下から引き出すパネルになる） -->
       <div class="sidebar" id="sidebar">
         <button class="sidebar-toggle-btn" id="sidebar-toggle" title="メニューを開閉">◀</button>
         <div class="sidebar-scroll-wrapper">
@@ -296,6 +340,14 @@ window.addEventListener('DOMContentLoaded', () => {
   const now = new Date();
   document.getElementById('current-date').textContent = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日`;
   
+  // スマホの場合は初期状態で情報パネルを閉じておき、タブのテキストを変更
+  if (window.innerWidth <= 768) {
+    document.getElementById('sidebar').classList.add('collapsed');
+    document.getElementById('sidebar-toggle').textContent = '▲ 情報を見る';
+  } else {
+    document.getElementById('sidebar-toggle').textContent = '◀';
+  }
+
   initMap();
   fetchJmaRadarTimestamps();
   loadOpenMeteoForecast();
@@ -320,26 +372,20 @@ function setupMapControlToggle() {
   });
 }
 
-// サイドバー開閉ロジック
+// パネル開閉ロジック（PC・スマホ対応）
 function setupSidebarToggle() {
   const sidebar = document.getElementById('sidebar');
   const toggleBtn = document.getElementById('sidebar-toggle');
-  const mapEl = document.getElementById('map');
   
   toggleBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     const isCollapsed = sidebar.classList.toggle('collapsed');
     
-    // パソコン画面とスマホ画面で矢印の向きやマップ高さを変更
+    // PCとスマホでボタンの文字と役割を切り替え
     if (window.innerWidth > 768) {
       toggleBtn.textContent = isCollapsed ? '▶' : '◀';
     } else {
-      toggleBtn.textContent = isCollapsed ? '▼' : '▲';
-      if (isCollapsed) {
-        mapEl.classList.add('expanded');
-      } else {
-        mapEl.classList.remove('expanded');
-      }
+      toggleBtn.textContent = isCollapsed ? '▲ 情報を見る' : '▼ 閉じる';
     }
     
     // 地図の表示サイズが変わるためLeafletに再計算させる
@@ -584,6 +630,11 @@ function render() {
     item.onclick = () => {
       if (!isNaN(lat) && !isNaN(lng)) {
         map.setView([lat, lng], 14);
+        // スマホの場合はマップが見えるようにパネルを自動で閉じる
+        if (window.innerWidth <= 768) {
+          document.getElementById('sidebar').classList.add('collapsed');
+          document.getElementById('sidebar-toggle').textContent = '▲ 情報を見る';
+        }
       }
     };
     
