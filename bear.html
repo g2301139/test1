@@ -752,23 +752,47 @@ async function fetchJmaRadarTimestamps() {
   }
 }
 
+// ★一番重要な修正箇所（ズーム限界の動的切り替えと、最小ズームの保証）
 function updateRadarLayer() {
-  const slider = document.getElementById('radar-time-slider');
-  if (radarLayer && typeof map !== 'undefined' && map.hasLayer(radarLayer)) {
-    map.removeLayer(radarLayer);
-  }
+  if(radarLayer) map.removeLayer(radarLayer);
+  const sliderIdx = document.getElementById('radar-time-slider').value;
   
-  const url = js_urls[slider.value];
-  if (!url) return;
+  if(js_urls[sliderIdx]) {
+    const url = js_urls[sliderIdx];
+    
+    // --- 追加・修正部分：JMAの仕様に合わせてズーム限界を細かく判定 ---
+    let maxNZ = 10; // デフォルトは30分以内の高解像度（ズーム10まで）
 
-  const isPrca = url.includes('/prca/');
-  const maxZ = isPrca ? 6 : 10;
+    if (url.includes('hrpns_nd')) {
+      // 1時間〜15時間先はズーム6まで
+      maxNZ = 6;
+    } else {
+      // 0〜60分以内 (hrpns) の場合、URLから「基準時刻」と「予測時刻」を抽出して差分を計算
+      const match = url.match(/\/nowc\/(\d{14})\/none\/(\d{14})\//);
+      if (match) {
+        const bt = match[1]; // 基準時刻 (例: 20260724120000)
+        const vt = match[2]; // 予測時刻 (例: 20260724124500)
+        
+        // UTCとしてパースして時間差（分）を求める
+        const bTime = new Date(Date.UTC(bt.slice(0,4), bt.slice(4,6)-1, bt.slice(6,8), bt.slice(8,10), bt.slice(10,12)));
+        const vTime = new Date(Date.UTC(vt.slice(0,4), vt.slice(4,6)-1, vt.slice(6,8), vt.slice(8,10), vt.slice(10,12)));
+        const diffMins = Math.round((vTime - bTime) / 60000);
+        
+        // JMA仕様：35分〜60分先はズーム8までしか存在しない
+        if (diffMins > 30) {
+          maxNZ = 8;
+        }
+      }
+    }
 
-  if (typeof map !== 'undefined') {
+    // 修正したmaxNZを適用し、maxZoom: 18 を明示して拡大時の消失を防ぐ
     radarLayer = L.tileLayer(url, { 
-      opacity: 0.65, 
+      opacity: 0.6, 
       zIndex: 1500,
-      maxNativeZoom: maxZ
+      minNativeZoom: 4, 
+      maxNativeZoom: maxNZ, // ここが時間帯によって 10, 8, 6 に変化する
+      maxZoom: 18,          // 必須：足りない解像度を無理やり拡大して表示させる
+      errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
     }).addTo(map);
   }
 }
