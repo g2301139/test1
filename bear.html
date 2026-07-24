@@ -415,7 +415,7 @@ function loadOpenMeteoForecast() {
     });
 }
 
-// === 7. 雨雲レーダー予測の取得と生成 (15時間先対応 修正版) ===
+// === 7. 雨雲レーダー予測の取得と生成 (完全版) ===
 function formatTimeLabel(dateObj, diffMins) {
   const pad = n => String(n).padStart(2, '0');
   const hhmm = `${pad(dateObj.getHours())}:${pad(dateObj.getMinutes())}`;
@@ -459,21 +459,19 @@ async function fetchJmaRadarTimestamps() {
     return;
   }
   
-  // ★修正箇所: 予測対象時間(validtime)をキーにして重複を排除し、最新の発表時間(basetime)を優先
+  // 予測対象時間(validtime)をキーにして重複を排除し、最新の発表時間(basetime)を優先
   const uniqueMap = new Map();
   allTargets.forEach(t => {
     const key = t.validtime;
     if (!uniqueMap.has(key)) {
       uniqueMap.set(key, t);
     } else {
-      // 既に同じ予測対象時間のデータがあれば、発表時間(basetime)が新しい方で上書き
       if (t.basetime > uniqueMap.get(key).basetime) {
         uniqueMap.set(key, t);
       }
     }
   });
 
-  // 再び配列に戻して古い順に並び替え
   const uniqueTargets = Array.from(uniqueMap.values());
   uniqueTargets.sort((a, b) => a.validtime.localeCompare(b.validtime));
 
@@ -481,7 +479,6 @@ async function fetchJmaRadarTimestamps() {
   js_urls = []; js_labels = []; js_dates = [];
   
   uniqueTargets.forEach(t => {
-    // UTCから日本時間(あるいはローカル時間)のDateオブジェクトを生成
     const vDate = new Date(Date.UTC(
       parseInt(t.validtime.substring(0,4)), 
       parseInt(t.validtime.substring(4,6)) - 1, 
@@ -493,11 +490,18 @@ async function fetchJmaRadarTimestamps() {
     
     if (diffMins < -60) return; // 1時間以上前の過去データは不要
 
-    let element = "hrpns";
+    // ★修正の要：気象庁の要素の優先順位を適正化
+    // 直近の詳細データ(hrpns)があれば優先し、なければ予測データ(hrpns_nd)を採用する
+    let element = null;
     if (t.elements && Array.isArray(t.elements)) {
-      if (t.elements.includes("hrpns_nd")) element = "hrpns_nd"; // 1〜15時間先（降水短時間）
-      else if (t.elements.includes("hrpns")) element = "hrpns";  // 直近（ナウキャスト）
+      if (t.elements.includes("hrpns")) {
+        element = "hrpns";
+      } else if (t.elements.includes("hrpns_nd")) {
+        element = "hrpns_nd";
+      }
     }
+    
+    if (!element) return; // 対象のデータが含まれていない時間はスキップ
     
     js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/nowc/${t.basetime}/none/${t.validtime}/surf/${element}/{z}/{x}/{y}.png`);
     js_dates.push(vDate);
@@ -519,15 +523,20 @@ async function fetchJmaRadarTimestamps() {
   slider.value = closestIdx;
   document.getElementById('time-label').textContent = js_labels[closestIdx];
   
-  // 15時間先までカバーしていることをUIに明示
   syncInfo.textContent = `過去1時間 〜 最大15時間先までの予測 (${js_urls.length}コマ)`;
 }
 
+// ★修正の要：地図をズームした際に、気象庁の画像が存在せずエラーになるのを防ぐ
 function updateRadarLayer() {
   if(radarLayer) map.removeLayer(radarLayer);
   const sliderIdx = document.getElementById('radar-time-slider').value;
   if(js_urls[sliderIdx]) {
-    radarLayer = L.tileLayer(js_urls[sliderIdx], { opacity: 0.6, zIndex: 1500 }).addTo(map);
+    radarLayer = L.tileLayer(js_urls[sliderIdx], { 
+      opacity: 0.6, 
+      zIndex: 1500,
+      maxNativeZoom: 10, // 気象庁の広域画像(最大ズーム10)を、ズームイン時にも自動で引き伸ばす魔法のコード
+      errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' // 404エラー時も破れた画像アイコンを出さない
+    }).addTo(map);
   }
 }
 
