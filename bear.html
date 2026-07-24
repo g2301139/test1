@@ -309,14 +309,14 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebas
 import { getFirestore, collection, onSnapshot, doc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 import { getMessaging, getToken } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging.js";
 
-//const firebaseConfig = {
-  //apiKey: "YOUR_API_KEY",
-//  authDomain: "YOUR_AUTH_DOMAIN",
- // projectId: "YOUR_PROJECT_ID",
-//  storageBucket: "YOUR_STORAGE_BUCKET",
-//  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-//  appId: "YOUR_APP_ID"
-//};
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_AUTH_DOMAIN",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_STORAGE_BUCKET",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
 
 const VAPID_KEY = "YOUR_VAPID_KEY"; // Web Push用キー
 
@@ -351,9 +351,9 @@ window.addEventListener('DOMContentLoaded', () => {
   initMap();
   fetchJmaRadarTimestamps();
   loadOpenMeteoForecast();
-  syncFirebaseData();
+  //syncFirebaseData();
   startLocationTracking();
-  setupPushNotification();
+  //setupPushNotification();
   setupSidebarToggle(); // 左メニュー開閉
   setupMapControlToggle(); // マップメニュー開閉
 });
@@ -459,7 +459,7 @@ function startLocationTracking() {
         const accuracy = pos.coords.accuracy;
 
         // ---【LINE通知用】ユーザーの現在位置をFirestoreにアップロード ---
-        const userLineId = localStorage.getItem("user_line_id") || "DEFAULT_USER";
+       /* const userLineId = localStorage.getItem("user_line_id") || "DEFAULT_USER";
         try {
           await setDoc(doc(db, "user_locations", userLineId), {
             lat: lat,
@@ -468,7 +468,7 @@ function startLocationTracking() {
           }, { merge: true });
         } catch (e) {
           console.warn("位置情報のFirestore同期失敗:", e);
-        }
+        }*/
         // ------------------------------------------------------------------
 
         if (isFirstLocation) {
