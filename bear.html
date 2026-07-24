@@ -274,6 +274,8 @@ const firebaseConfig = {
   appId: "YOUR_APP_ID"
 };
 
+const VAPID_KEY = "YOUR_VAPID_KEY"; // Web Push用キー
+
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const messaging = getMessaging(app);
@@ -301,10 +303,10 @@ window.addEventListener('DOMContentLoaded', () => {
   startLocationTracking();
   setupPushNotification();
   setupSidebarToggle(); // 左メニュー開閉
-  setupMapControlToggle(); // マップメニュー開閉（新機能）
+  setupMapControlToggle(); // マップメニュー開閉
 });
 
-// マップ上のメニュー開閉ロジック（追加）
+// マップ上のメニュー開閉ロジック
 function setupMapControlToggle() {
   const toggleHeader = document.getElementById('map-ui-toggle');
   const content = document.getElementById('map-ui-content');
@@ -397,7 +399,7 @@ function initMap() {
   initEvents();
 }
 
-// リアルタイム位置情報の追跡性能を強化
+// リアルタイム位置情報の追跡性能を強化 ＆ LINE通知用にFirebaseへ座標更新保存
 function startLocationTracking() {
   if (navigator.geolocation) {
     if (watchId !== null) {
@@ -405,10 +407,23 @@ function startLocationTracking() {
     }
 
     watchId = navigator.geolocation.watchPosition(
-      pos => {
+      async pos => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
         const accuracy = pos.coords.accuracy;
+
+        // ---【LINE通知用】ユーザーの現在位置をFirestoreにアップロード ---
+        const userLineId = localStorage.getItem("user_line_id") || "DEFAULT_USER";
+        try {
+          await setDoc(doc(db, "user_locations", userLineId), {
+            lat: lat,
+            lng: lng,
+            updatedAt: new Date()
+          }, { merge: true });
+        } catch (e) {
+          console.warn("位置情報のFirestore同期失敗:", e);
+        }
+        // ------------------------------------------------------------------
 
         if (isFirstLocation) {
           if (map) {
