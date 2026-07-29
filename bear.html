@@ -661,46 +661,110 @@ function render() {
 async function fetchJmaRadarTimestamps() {
   try {
     const ts = Date.now();
-    const res = await fetch(`https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}`);
-    const data = await res.json();
+    // 過去〜現在(N1)、直近予測(N2)、長期予測(N3)の時刻データを一括取得
+    const [res1, res2, res3] = await Promise.all([
+      fetch(`https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}`),
+      fetch(`https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_=${ts}`),
+      fetch(`https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N3.json?_=${ts}`)
+    ]);
     
-    let sortedTimes = [];
-    data.forEach(t => {
-      if (t.basetime && t.validtime) {
-        sortedTimes.push({
-          basetime: t.basetime,
-          validtime: t.validtime,
-          prod: "nowc",
-          element: t.elements ? t.elements[0] : "hrpns"
-        });
+    const data1 = await res1.json();
+    const data2 = await res2.json();
+    const data3 = await res3.json();
+    
+    // 全データを結合して時刻順にソート、重複を排除
+    let allData = [...data1, ...data2, ...data3];
+    allData.sort((a, b) => a.validtime.localeCompare(b.validtime));
+    
+    const uniqueTimes = [];
+    const seen = new Set();
+    allData.forEach(t => {
+      if (!seen.has(t.validtime)) {
+        seen.add(t.validtime);
+        uniqueTimes.push(t);
       }
     });
 
-    sortedTimes.sort((a, b) => a.validtime.localeCompare(b.validtime));
-    
-    if (sortedTimes.length > 0) {
-      const latestNowc = sortedTimes[sortedTimes.length - 1];
+    const now = new Date();
+    js_urls = [];
+    js_labels = [];
+
+    uniqueTimes.forEach((t) => {
+      const year = parseInt(t.validtime.substring(0,4));
+      const month = parseInt(t.validtime.substring(4,6)) - 1;
+      const day = parseInt(t.validtime.substring(6,8));
+      const hour = parseInt(t.validtime.substring(8,10));
+      const min = parseInt(t.validtime.substring(10,12));
       
-      const bY = parseInt(latestNowc.validtime.substring(0,4));
-      const bM = parseInt(latestNowc.validtime.substring(4,6)) - 1;
-      const bD = parseInt(latestNowc.validtime.substring(6,8));
-      const bH = parseInt(latestNowc.validtime.substring(8,10));
+      const validDateUtc = new Date(Date.UTC(year, month, day, hour, min));
+      const diffMins = Math.round((validDateUtc - now) / 60000);
+
+      // 過去1時間以前の古いデータは除外
+      if (diffMins < -60) return;
+
+      const timeStr = `${String(validDateUtc.getHours()).padStart(2,'0')}:${String(validDateUtc.getMinutes()).padStart(2,'0')}`;
+      const element = t.elements ? t.elements[0] : "hrpns";
       
-      let baseUtc = new Date(Date.UTC(bY, bM, bD, bH, 0, 0));
-      let prcaBasetime = `${baseUtc.getUTCFullYear()}${String(baseUtc.getUTCMonth()+1).padStart(2,'0')}${String(baseUtc.getUTCDate()).padStart(2,'0')}${String(baseUtc.getUTCHours()).padStart(2,'0')}0000`;
+      js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/nowc/${t.basetime}/none/${t.validtime}/surf/${element}/{z}/{x}/{y}.png`);
       
-      for(let h = 1; h <= 15; h++) {
-         let vDate = new Date(baseUtc.getTime() + h * 3600000);
-         let validStr = `${vDate.getUTCFullYear()}${String(vDate.getUTCMonth()+1).padStart(2,'0')}${String(vDate.getUTCDate()).padStart(2,'0')}${String(vDate.getUTCHours()).padStart(2,'0')}0000`;
-         
-         sortedTimes.push({
-           basetime: prcaBasetime,
-           validtime: validStr,
-           prod: "prca",
-           element: "prca"
-         });
+      if (diffMins <= 5 && diffMins >= -15) {
+        js_labels.push(`現在 (${timeStr})`);
+      } else if (diffMins < 0) {
+        js_labels.push(`${Math.abs(diffMins)}分前 (${timeStr})`);
+      } else if (diffMins > 5 && diffMins < 60) {
+        js_labels.push(`${diffMins}分後 (${timeStr})`);
+      } else {
+        const hDiff = Math.floor(diffMins / 60);
+        const mDiff = diffMins % 60;
+        if (mDiff === 0) js_labels.push(`${hDiff}時間後 (${timeStr})`);
+        else js_labels.push(`${hDiff}時間${mDiff}分後 (${timeStr})`);
       }
+    });
+
+    const slider = document.getElementById('radar-time-slider');
+    if (slider && js_urls.length > 0) {
+      slider.max = js_urls.length - 1;
+      
+      const currentIndex = js_labels.findIndex(label => label.includes("現在"));
+      slider.value = currentIndex !== -1 ? currentIndex : 0;
+      
+      const timeLabel = document.getElementById('time-label');
+      if (timeLabel) timeLabel.textContent = js_labels[slider.value];
+      
+      if (isRadarActive) updateRadarLayer();
     }
+  } catch (e) {
+    console.error("雨雲データの取得に失敗しました。", e);
+  }
+}
+
+function updateRadarLayer() {
+  const sliderIdx = document.getElementById('radar-time-slider').value;
+  if (!js_urls[sliderIdx]) return;
+  
+  const url = js_urls[sliderIdx];
+  
+  // hrpns(直近)はズーム10まで、hrpns_nd(1時間以降)はズーム6まで
+  const maxNZ = url.includes('hrpns_nd') ? 6 : 10;
+
+  if (radarLayer) {
+    // 削除せずにURLだけを差し替える（チラつき・消失防止）
+    radarLayer.options.maxNativeZoom = maxNZ;
+    radarLayer.setUrl(url);
+  } else {
+    radarLayer = L.tileLayer(url, { 
+      opacity: 0.6, 
+      zIndex: 1500,
+      minNativeZoom: 4, 
+      maxNativeZoom: maxNZ, 
+      maxZoom: 18,
+      errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+    });
+    if (isRadarActive) {
+      radarLayer.addTo(map);
+    }
+  }
+}
 
     const now = new Date();
     js_urls = [];
@@ -882,12 +946,11 @@ function initEvents() {
   
   const radarSlider = document.getElementById('radar-time-slider');
   if (radarSlider) {
+    // inputイベント（スライド中）に全てまとめることで、動かしながらリアルタイム表示
     radarSlider.addEventListener('input', function() { 
       if (js_labels && js_labels.length > 0) {
         document.getElementById('time-label').textContent = js_labels[this.value]; 
       }
-    });
-    radarSlider.addEventListener('change', function() { 
       if (isRadarActive) updateRadarLayer(); 
     });
   }
