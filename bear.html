@@ -647,22 +647,22 @@ function render() {
 
 // ★修正版：気象庁のN1, N2, N3の3つのファイルから確実なURLリストを作成する
 // 1. 通信エラーでシステム全体が止まらないようにする安全な取得関数
+// 1. 安全なデータ取得関数
 async function fetchJsonSafe(url) {
   try {
     const res = await fetch(url);
     if (!res.ok) return [];
     return await res.json();
   } catch (e) {
-    return []; // エラー時は空のデータを返し、処理を止めない
+    console.error("fetchエラー:", url, e);
+    return []; 
   }
 }
 
-// 2. データ取得関数をまるごと差し替え
+// 2. 雨雲データリストの作成
 async function fetchJmaRadarTimestamps() {
   try {
     const ts = Date.now();
-    
-    // N1(過去), N2(現在〜1時間), N3(1時間〜15時間) を同時に安全に取得
     const [data1, data2, data3] = await Promise.all([
       fetchJsonSafe(`https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}`),
       fetchJsonSafe(`https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_=${ts}`),
@@ -692,7 +692,7 @@ async function fetchJmaRadarTimestamps() {
       const validDateUtc = new Date(Date.UTC(year, month, day, hour, min));
       const diffMins = Math.round((validDateUtc - now) / 60000);
 
-      if (diffMins < -60) return; // 1時間以上過去は捨てる
+      if (diffMins < -60) return;
 
       const localDate = new Date(validDateUtc.getTime());
       const timeStr = `${String(localDate.getHours()).padStart(2,'0')}:${String(localDate.getMinutes()).padStart(2,'0')}`;
@@ -727,37 +727,35 @@ async function fetchJmaRadarTimestamps() {
   }
 }
 
-// 3. レイヤー更新関数をまるごと差し替え（Leafletの罠対策版）
+// 3. レイヤー更新（ズームレベルの安全リミッターを「5」に強化）
 function updateRadarLayer() {
   const sliderIdx = document.getElementById('radar-time-slider').value;
   if (!js_urls[sliderIdx]) return;
   
   const url = js_urls[sliderIdx];
-  // 1時間以降(hrpns_nd)は解像度が下がるためズーム6を指定
-  const maxNZ = url.includes('hrpns_nd') ? 6 : 10; 
+  
+  // ★重要：URLに「/hrpns/」（1時間以内の高解像度データ）が含まれていなければ、
+  // 15時間先までの荒いデータだと判断し、ズーム上限を「5」に抑える！
+  const isHighRes = url.includes('/hrpns/');
+  const maxNZ = isHighRes ? 10 : 5; 
 
-  // URL差し替えではなく、毎回新しいレイヤーを生成してズーム制限を確実に適用する
   const newLayer = L.tileLayer(url, { 
     opacity: 0.6, 
     zIndex: 1500,
     minNativeZoom: 4, 
-    maxNativeZoom: maxNZ, // ここで正確なズーム上限が適用される
-    maxZoom: 18,          // マップ自体は拡大できるように強制
+    maxNativeZoom: maxNZ, // ここでズームレベル5の画像を引き伸ばして表示させる
+    maxZoom: 18,
     errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
   });
 
   if (isRadarActive) {
     newLayer.addTo(map);
-    
-    // 【ちらつき防止】新しい画像が読み込まれてから、古い画像を削除する
     newLayer.on('load', () => {
       if (radarLayer && radarLayer !== newLayer) {
         map.removeLayer(radarLayer);
       }
       radarLayer = newLayer;
     });
-    
-    // 万が一読み込みが止まった場合の保険
     setTimeout(() => {
       if (radarLayer && radarLayer !== newLayer) {
         map.removeLayer(radarLayer);
