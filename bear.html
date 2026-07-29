@@ -661,52 +661,31 @@ function render() {
 async function fetchJmaRadarTimestamps() {
   try {
     const ts = Date.now();
-    const res = await fetch(`https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}`);
-    const data = await res.json();
+    // ★ここがポイント！ 過去(N1)、現在(N2)、1〜15時間先(N3)の公式リストを全部取ってくる
+    const [res1, res2, res3] = await Promise.all([
+      fetch(`https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json?_=${ts}`),
+      fetch(`https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json?_=${ts}`),
+      fetch(`https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N3.json?_=${ts}`)
+    ]);
     
-    let sortedTimes = [];
-    data.forEach(t => {
-      if (t.basetime && t.validtime) {
-        sortedTimes.push({
-          basetime: t.basetime,
-          validtime: t.validtime,
-          prod: "nowc",
-          element: t.elements ? t.elements[0] : "hrpns"
-        });
-      }
+    const data1 = await res1.json();
+    const data2 = await res2.json();
+    const data3 = await res3.json(); // これが15時間先までのデータ
+    
+    let allData = [...data1, ...data2, ...data3];
+    allData.sort((a, b) => a.validtime.localeCompare(b.validtime));
+    
+    const uniqueTimes = [];
+    const seen = new Set();
+    allData.forEach(t => {
+      if (!seen.has(t.validtime)) { seen.add(t.validtime); uniqueTimes.push(t); }
     });
-
-    sortedTimes.sort((a, b) => a.validtime.localeCompare(b.validtime));
-    
-    if (sortedTimes.length > 0) {
-      const latestNowc = sortedTimes[sortedTimes.length - 1];
-      
-      const bY = parseInt(latestNowc.validtime.substring(0,4));
-      const bM = parseInt(latestNowc.validtime.substring(4,6)) - 1;
-      const bD = parseInt(latestNowc.validtime.substring(6,8));
-      const bH = parseInt(latestNowc.validtime.substring(8,10));
-      
-      let baseUtc = new Date(Date.UTC(bY, bM, bD, bH, 0, 0));
-      let prcaBasetime = `${baseUtc.getUTCFullYear()}${String(baseUtc.getUTCMonth()+1).padStart(2,'0')}${String(baseUtc.getUTCDate()).padStart(2,'0')}${String(baseUtc.getUTCHours()).padStart(2,'0')}0000`;
-      
-      for(let h = 1; h <= 15; h++) {
-         let vDate = new Date(baseUtc.getTime() + h * 3600000);
-         let validStr = `${vDate.getUTCFullYear()}${String(vDate.getUTCMonth()+1).padStart(2,'0')}${String(vDate.getUTCDate()).padStart(2,'0')}${String(vDate.getUTCHours()).padStart(2,'0')}0000`;
-         
-         sortedTimes.push({
-           basetime: prcaBasetime,
-           validtime: validStr,
-           prod: "prca",
-           element: "prca"
-         });
-      }
-    }
 
     const now = new Date();
     js_urls = [];
     js_labels = [];
 
-    sortedTimes.forEach((t) => {
+    uniqueTimes.forEach((t) => {
       const year = parseInt(t.validtime.substring(0,4));
       const month = parseInt(t.validtime.substring(4,6)) - 1;
       const day = parseInt(t.validtime.substring(6,8));
@@ -714,17 +693,20 @@ async function fetchJmaRadarTimestamps() {
       const min = parseInt(t.validtime.substring(10,12));
       
       const validDateUtc = new Date(Date.UTC(year, month, day, hour, min));
-      const validDateJst = new Date(validDateUtc.getTime());
+      const diffMins = Math.round((validDateUtc - now) / 60000);
+
+      if (diffMins < -60) return; // 1時間以上過去は捨てる
+
+      const timeStr = `${String(validDateUtc.getHours()).padStart(2,'0')}:${String(validDateUtc.getMinutes()).padStart(2,'0')}`;
+      const element = t.elements ? t.elements[0] : "hrpns";
       
-      const diffMins = Math.round((validDateJst - now) / 60000);
-
-      if (diffMins < -15) return;
-
-      const timeStr = `${String(validDateJst.getHours()).padStart(2,'0')}:${String(validDateJst.getMinutes()).padStart(2,'0')}`;
-      js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/${t.prod}/${t.basetime}/none/${t.validtime}/surf/${t.element}/{z}/{x}/{y}.png`);
+      // 公式リストに書いてある通りの正しいURLを生成
+      js_urls.push(`https://www.jma.go.jp/bosai/jmatile/data/nowc/${t.basetime}/none/${t.validtime}/surf/${element}/{z}/{x}/{y}.png`);
       
       if (diffMins <= 5 && diffMins >= -15) {
         js_labels.push(`現在 (${timeStr})`);
+      } else if (diffMins < 0) {
+        js_labels.push(`${Math.abs(diffMins)}分前 (${timeStr})`);
       } else if (diffMins > 5 && diffMins < 60) {
         js_labels.push(`${diffMins}分後 (${timeStr})`);
       } else {
@@ -738,55 +720,39 @@ async function fetchJmaRadarTimestamps() {
     const slider = document.getElementById('radar-time-slider');
     if (slider && js_urls.length > 0) {
       slider.max = js_urls.length - 1;
-      
       const currentIndex = js_labels.findIndex(label => label.includes("現在"));
       slider.value = currentIndex !== -1 ? currentIndex : 0;
-      
-      const timeLabel = document.getElementById('time-label');
-      if (timeLabel) timeLabel.textContent = js_labels[slider.value];
-      
+      document.getElementById('time-label').textContent = js_labels[slider.value];
       if (isRadarActive) updateRadarLayer();
     }
   } catch (e) {
-    console.error("雨雲データの取得に失敗しました。", e);
+    console.error("雨雲データの取得に失敗:", e);
   }
 }
 
-// ★一番重要な修正箇所（ズーム限界の動的切り替えと、最小ズームの保証）
-// ★最終決定版：ズーム限界をすべて6に固定し、確実な表示を優先する
-// ★一番重要な修正箇所（ズーム限界の動的切り替えと、最小ズームの保証）
 function updateRadarLayer() {
-  if(radarLayer) map.removeLayer(radarLayer);
   const sliderIdx = document.getElementById('radar-time-slider').value;
+  if (!js_urls[sliderIdx]) return;
   
-  if(js_urls[sliderIdx]) {
-    const url = js_urls[sliderIdx];
-    
-    // --- 追加・修正部分：JMAの仕様に合わせてズーム限界を細かく判定 ---
-    let maxNZ = 10; // デフォルトは30分以内の高解像度（ズーム10まで）
+  const url = js_urls[sliderIdx];
+  const maxNZ = url.includes('hrpns_nd') ? 6 : 10; // 15時間先(hrpns_nd)は解像度が下がるためズーム6にする
 
-    if (url.includes('hrpns_nd')) {
-      // 1時間〜15時間先はズーム6まで
-      maxNZ = 6;
-    } else {
-      // 0〜60分以内 (hrpns) の場合、URLから「基準時刻」と「予測時刻」を抽出して差分を計算
-      const match = url.match(/\/nowc\/(\d{14})\/none\/(\d{14})\//);
-      if (match) {
-        const bt = match[1]; // 基準時刻 (例: 20260724120000)
-        const vt = match[2]; // 予測時刻 (例: 20260724124500)
-        
-        // UTCとしてパースして時間差（分）を求める
-        const bTime = new Date(Date.UTC(bt.slice(0,4), bt.slice(4,6)-1, bt.slice(6,8), bt.slice(8,10), bt.slice(10,12)));
-        const vTime = new Date(Date.UTC(vt.slice(0,4), vt.slice(4,6)-1, vt.slice(6,8), vt.slice(8,10), vt.slice(10,12)));
-        const diffMins = Math.round((vTime - bTime) / 60000);
-        
-        // JMA仕様：35分〜60分先はズーム8までしか存在しない
-        if (diffMins > 30) {
-          maxNZ = 8;
-        }
-      }
-    }
-
+  if (radarLayer) {
+    // レイヤーを削除せず、画像URLだけ差し替える（これで拡大縮小で消えなくなる！）
+    radarLayer.options.maxNativeZoom = maxNZ;
+    radarLayer.setUrl(url);
+  } else {
+    radarLayer = L.tileLayer(url, { 
+      opacity: 0.6, 
+      zIndex: 1500,
+      minNativeZoom: 4, 
+      maxNativeZoom: maxNZ, 
+      maxZoom: 18,
+      errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+    });
+    if (isRadarActive) radarLayer.addTo(map);
+  }
+}
     // 修正したmaxNZを適用し、maxZoom: 18 を明示して拡大時の消失を防ぐ
     radarLayer = L.tileLayer(url, { 
       opacity: 0.6, 
